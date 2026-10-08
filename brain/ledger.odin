@@ -37,6 +37,11 @@ cmd_ledger :: proc(cli: ^Cli, args: []string) -> int {
 	by_session := "select session, coalesce(nullif(caller,''),'?') as caller, min(ts) as first, max(ts) as last, " + cols + " from queries where session <> '' group by session order by last desc limit 20"
 	by_day := "select date(ts) as day, " + cols + " from queries where ts >= date('now', ? ) group by 1 order by 1 desc"
 	since_arg := strings.concatenate({"-", int_str(i64(days)), " day"})
+	// What carries the load: the bullets served most, and to how many
+	// sessions, over the same days.
+	top := `select h.handle, h.file, count(*) as served, count(distinct nullif(q.session,'')) as sessions
+	   from query_hits h join queries q on q.id = h.query_id
+	   where h.handle <> '' and q.ts >= date('now', ?) group by 1, 2 order by served desc limit 10`
 	if cli.json {
 		w := jw_make()
 		jw_obj(&w)
@@ -48,6 +53,8 @@ cmd_ledger :: proc(cli: ^Cli, args: []string) -> int {
 		jw_rows(&w, db, by_session, i64(baseline))
 		jw_key(&w, "days")
 		jw_rows(&w, db, by_day, i64(baseline), since_arg)
+		jw_key(&w, "top_bullets")
+		jw_rows(&w, db, top, since_arg)
 		jw_end_obj(&w)
 		jw_flush(cli, &w)
 		return 0

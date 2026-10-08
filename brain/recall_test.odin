@@ -191,3 +191,45 @@ pi_adapter_reads_tool_calls_and_their_results :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(pi_emit(f.cli, file).turns), 0)
 	testing.expect_value(t, len(pi_scan(f.cli, file).turns), 1)
 }
+
+@(test)
+recall_around_shows_the_session_either_side :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := recall_fixture(t)
+	defer fixture_destroy(f)
+	exec(f.cli, "recall", "--enable", "fixture")
+	exec(f.cli, "recall", "--sync")
+	hits, _, _ := exec(f.cli, "recall", "--json", "playhead")
+	Hit :: struct {
+		id: string,
+	}
+	found: []Hit
+	testing.expect_value(t, json.unmarshal_string(hits, &found), nil)
+	testing.expect(t, len(found) > 0, hits)
+	if len(found) == 0 {
+		return
+	}
+	o, _, code := exec(f.cli, "recall", "--json", "--around", found[0].id)
+	testing.expect_value(t, code, 0)
+	Around :: struct {
+		id:    string,
+		turns: []struct {
+			id:  string,
+			hit: bool,
+		},
+	}
+	a: Around
+	testing.expect_value(t, json.unmarshal_string(o, &a), nil)
+	testing.expect(t, len(a.turns) >= 2, o)
+	marked := 0
+	for x in a.turns {
+		if x.hit {
+			marked += 1
+			testing.expect_value(t, x.id, a.id)
+		}
+	}
+	testing.expect_value(t, marked, 1)
+	_, e, bad := exec(f.cli, "recall", "--around", "nosuchturn")
+	testing.expect_value(t, bad, 1)
+	testing.expect(t, strings.contains(e, "no turn"), e)
+}

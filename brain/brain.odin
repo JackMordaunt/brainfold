@@ -255,6 +255,10 @@ run :: proc(cli: ^Cli, raw_args: []string) -> int {
 		return cmd_verify(cli, rest)
 	case "learn":
 		return cmd_learn(cli, rest)
+	case "alias":
+		return cmd_alias(cli, rest)
+	case "bullet":
+		return cmd_bullet(cli, rest)
 	case "lint":
 		return cmd_lint(cli, rest)
 	case "secrets":
@@ -305,7 +309,8 @@ Ask
   brain prime [<prompt>]     what the vault knows about one prompt, once per session; the
                              hooks call it with --harness, --session, or JSON on stdin
   brain recall <terms...>    what past agent conversations said; --limit N, --full <id>,
-                             --sessions, --prefix, --enable <agent>, --sources
+                             --around <id> (the turns either side), --sessions, --prefix,
+                             --enable <agent>, --sources
   brain howto <terms...>     the shell commands that did it last time, from the transcripts;
                              --all lists the sessions, --propose keeps the chain in the vault
   brain day [YYYY-MM-DD]     what was worked on that day, by repository: sessions, goals, commits
@@ -337,6 +342,8 @@ Keep it healthy
                              verify, which bullets were served just before a correction
   brain learn                which query words found a bullet they do not name, and which
                              aliases nobody asks for; --apply edits the bullets and vocabulary
+  brain alias <handle>       a bullet's other names; add|remove <handle> <term>... edits them
+  brain bullet list          every bullet; check|write|replace|drop edit one, lint first
   brain verify [<handle>..]  test the claims bullets make: paths, vault files, subcommands,
                              commits; --apply dates today every bullet whose claims passed
   brain log                  what keeps missing, and who asks

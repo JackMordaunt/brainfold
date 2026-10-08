@@ -273,6 +273,11 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 			)
 			out(cli, "\n")
 			return 0
+		case "--around":
+			if len(rest) == 0 {
+				return fail(cli, "recall --around <turn-id>")
+			}
+			return recall_around(cli, rest[0], json_out)
 		case "--limit":
 			if len(rest) > 0 {
 				limit, _ = strconv.parse_int(rest[0])
@@ -461,4 +466,91 @@ json_escape :: proc(s: string) -> string {
 		}
 	}
 	return strings.to_string(b)
+}
+
+// AROUND is how many turns recall --around shows on each side of the one
+// asked for.
+AROUND :: 4
+
+// recall_around prints the conversation a turn sits in: the AROUND turns
+// before it in its session, the turn, and the AROUND after, oldest first,
+// so a hit reads in the exchange that produced it.
+recall_around :: proc(cli: ^Cli, id: string, json_out: bool) -> int {
+	db, err := open_recall_db(cli)
+	if err != "" {
+		return fail(cli, err)
+	}
+	defer sqlite3.close(&db)
+	Turn_Row :: struct {
+		id, ts, role, body: string,
+	}
+	row :: proc(stmt: sqlite3.Stmt) -> Turn_Row {
+		return {strings.clone(sqlite3.text(stmt, 0)), strings.clone(sqlite3.text(stmt, 1)), strings.clone(sqlite3.text(stmt, 2)), strings.clone(sqlite3.text(stmt, 3))}
+	}
+	full := scalar_text(db, "select id from turn where id like ? limit 1", strings.concatenate({id, "%"}))
+	if full == "" {
+		return fail(cli, fmt.aprintf("recall: no turn %s", id))
+	}
+	session := scalar_text(db, "select session from turn where id=?", full)
+	title := scalar_text(db, "select title from turn where id=?", full)
+	ts := scalar_text(db, "select ts from turn where id=?", full)
+	turns := make([dynamic]Turn_Row)
+	before, berr := sqlite3.query(
+		db,
+		"select id, ts, role, body from turn where session=? and (ts < ? or (ts = ? and id < ?)) order by ts desc, id desc limit ?",
+		session,
+		ts,
+		ts,
+		full,
+		i64(AROUND),
+	)
+	if berr == nil {
+		for sqlite3.next(&before) {
+			inject_at(&turns, 0, row(before))
+		}
+		sqlite3.finish(&before)
+	}
+	after, aerr := sqlite3.query(
+		db,
+		"select id, ts, role, body from turn where session=? and (ts > ? or (ts = ? and id >= ?)) order by ts, id limit ?",
+		session,
+		ts,
+		ts,
+		full,
+		i64(AROUND + 1),
+	)
+	if aerr == nil {
+		for sqlite3.next(&after) {
+			append(&turns, row(after))
+		}
+		sqlite3.finish(&after)
+	}
+	if json_out {
+		w := jw_make()
+		jw_obj(&w)
+		jw_field(&w, "id", full)
+		jw_field(&w, "session", session)
+		jw_field(&w, "title", title)
+		jw_key(&w, "turns")
+		jw_arr(&w)
+		for t in turns {
+			jw_obj(&w)
+			jw_field(&w, "id", t.id)
+			jw_field(&w, "ts", t.ts)
+			jw_field(&w, "role", t.role)
+			jw_field(&w, "body", t.body)
+			jw_field_bool(&w, "hit", t.id == full)
+			jw_end_obj(&w)
+		}
+		jw_end_arr(&w)
+		jw_end_obj(&w)
+		jw_flush(cli, &w)
+		return 0
+	}
+	outf(cli, "%s\n", title)
+	for t in turns {
+		mark := t.id == full ? ">>" : "  "
+		outf(cli, "\n%s %s  %s\n%s\n", mark, t.ts, t.role, t.body)
+	}
+	return 0
 }
