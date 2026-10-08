@@ -102,3 +102,159 @@ bullet_list_is_every_bullet_with_its_place :: proc(t: ^testing.T) {
 		testing.expect_value(t, l.files[0], "AI/MEMORY.md")
 	}
 }
+
+@(test)
+bullet_touch_dates_a_bullet_today :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	o, e, code := exec(f.cli, "bullet", "touch", "fixture tool")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "touched **fixture tool** at AI/MEMORY.md:8"), e)
+	text, _ := read_text(path.join(f.vault, "AI", "MEMORY.md"))
+	want := strings.concatenate({"- **fixture tool** (aliases: fixture, sample, test vault) — a stand-in fact used only by the test suite — fixture — ", today_iso()})
+	testing.expect(t, strings.contains(text, want), text)
+}
+
+@(test)
+bullet_at_names_one_of_two_sharing_a_handle :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	learnings := path.join(f.vault, "AI", "LEARNINGS.md")
+	text, _ := read_text(learnings)
+	path.write(learnings, strings.concatenate({text, "- **fixture tool** (aliases: twin) — the same name, another fact — fixture — 2026-01-03\n"}))
+	exec(f.cli, "reindex")
+	_, e, code := exec(f.cli, "bullet", "drop", "fixture tool")
+	testing.expect_value(t, code, 1)
+	testing.expect(t, strings.contains(e, "2 bullets are"), e)
+	n := len(strings.split_lines(text)) // the twin's line
+	_, e, code = exec(f.cli, "bullet", "drop", "fixture tool", "--at", "AI/MEMORY.md:3")
+	testing.expect_value(t, code, 1)
+	testing.expect(t, strings.contains(e, "no longer **fixture tool**"), "a line not holding the handle is refused")
+	o: string
+	o, e, code = exec(f.cli, "bullet", "replace", "fixture tool", "- **fixture twin** (aliases: twin) — the same name, another fact — fixture — 2026-01-03", "--at", strings.concatenate({"AI/LEARNINGS.md:", int_str(i64(n))}))
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "replaced **fixture twin**"), e)
+	_, e, code = exec(f.cli, "bullet", "touch", "fixture tool")
+	testing.expect_value(t, code, 0) // one bullet has the handle again
+	_, e, code = exec(f.cli, "bullet", "touch", "fixture tool", "--at")
+	testing.expect_value(t, code, 1)
+}
+
+@(test)
+unlink_makes_a_dead_link_plain_text :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	note := path.join(f.vault, "AI", "artifacts", "links.md")
+	path.write(note, "# Links\n\nsee [[gone]] and [[gone|the old page]], not [[kept]]\n")
+	exec(f.cli, "reindex")
+	o, e, code := exec(f.cli, "unlink", "AI/artifacts/links.md", "3", "gone")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "unlinked [[gone]]"), e)
+	text, _ := read_text(note)
+	testing.expect_value(t, text, "# Links\n\nsee gone and the old page, not [[kept]]\n")
+	_, e, code = exec(f.cli, "unlink", "AI/artifacts/links.md", "3", "gone")
+	testing.expect_value(t, code, 1)
+	testing.expect(t, strings.contains(e, "has no [[gone]]"), e)
+	_, e, code = exec(f.cli, "unlink", "../outside.md", "1", "gone")
+	testing.expect_value(t, code, 1)
+	testing.expect(t, strings.contains(e, "not a file in the vault"), e)
+}
+
+@(test)
+bullet_edits_without_a_handle_say_how :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	for verb in ([3]string{"replace", "drop", "touch"}) {
+		_, e, code := exec(f.cli, "bullet", verb)
+		testing.expect_value(t, code, 1)
+		testing.expect(t, strings.contains(e, "usage: brain bullet"), e)
+	}
+}
+
+@(test)
+bullet_show_says_what_served_it :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	exec(f.cli, "find", "fixture")
+	o, e, code := exec(f.cli, "--json", "bullet", "show", "fixture tool")
+	testing.expect_value(t, code, 0)
+	Show :: struct {
+		file:     string,
+		line:     int,
+		fact:     string,
+		served:   struct {
+			times:    int,
+			sessions: int,
+			queries:  []struct {
+				query: string,
+				times: int,
+			},
+		},
+		claims:   []struct {
+			verdict: string,
+		},
+		history:  []struct {
+			commit: string,
+		},
+		proposed: Maybe(struct {
+			session: string,
+		}),
+	}
+	s: Show
+	testing.expect(t, json.unmarshal_string(o, &s) == nil, e)
+	testing.expect_value(t, s.file, "AI/MEMORY.md")
+	testing.expect_value(t, s.line, 8)
+	testing.expect_value(t, s.fact, "a stand-in fact used only by the test suite")
+	testing.expect_value(t, s.served.times, 1)
+	testing.expect(t, len(s.served.queries) == 1 && s.served.queries[0].query == "fixture" && s.served.queries[0].times == 1, o)
+	testing.expect_value(t, len(s.history), 0) // the fixture is no git repository
+	_, proposed := s.proposed.?
+	testing.expect(t, !proposed, "no transcript proposed it")
+	_, e, code = exec(f.cli, "bullet", "show", "no such bullet")
+	testing.expect_value(t, code, 1)
+	testing.expect(t, strings.contains(e, "no bullet"), e)
+}
+
+@(test)
+bullet_show_lists_the_commits_that_changed_it :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	git(t, f.vault, "init", "-q")
+	git(t, f.vault, "add", "-A")
+	git(t, f.vault, "commit", "-q", "-m", "the fixture")
+	exec(f.cli, "bullet", "touch", "fixture tool")
+	git(t, f.vault, "commit", "-q", "-am", "dated it")
+	o, e, code := exec(f.cli, "--json", "bullet", "show", "fixture tool")
+	testing.expect_value(t, code, 0)
+	Show :: struct {
+		history: []struct {
+			subject: string,
+			files:   []string,
+		},
+	}
+	s: Show
+	testing.expect(t, json.unmarshal_string(o, &s) == nil, e)
+	// A re-date keeps the handle's count, so only the commit that added it
+	// changed how often it appears.
+	testing.expect_value(t, len(s.history), 1)
+	if len(s.history) == 1 {
+		testing.expect_value(t, s.history[0].subject, "the fixture")
+		testing.expect(t, slice_has(s.history[0].files, "AI/MEMORY.md"), o)
+	}
+}
+
+@(private = "file")
+slice_has :: proc(xs: []string, x: string) -> bool {
+	for y in xs {
+		if y == x {
+			return true
+		}
+	}
+	return false
+}

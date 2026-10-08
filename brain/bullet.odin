@@ -1,6 +1,7 @@
 package brain
 
 import "core:fmt"
+import "core:strconv"
 import "core:strings"
 import "core:text/regex"
 import "core:unicode/utf8"
@@ -16,12 +17,17 @@ import "jm:sqlite3"
 //	brain bullet write '<bullet>' [--to F]   add it to a core file (MEMORY by default)
 //	brain bullet replace <handle> '<bullet>' put it in the place of the bullet now named so
 //	brain bullet drop <handle>               take that bullet out
+//	brain bullet touch <handle>              date it today: it was checked and still holds
+//	brain bullet show <handle>               it, and where it came from: serves, claims, commits, proposal
+//
+// replace, drop, touch and show take --at FILE:LINE, which names the one meant
+// where two bullets share a handle; without it such a handle is refused.
 //
 // A bullet is written only when check finds nothing wrong with it, and a
 // handle stays unique: a write or a rename onto a handle another bullet
 // has is refused. Every write reindexes.
 cmd_bullet :: proc(cli: ^Cli, args: []string) -> int {
-	usage :: "usage: brain bullet list | check '<bullet>' | write '<bullet>' [--to MEMORY|LEARNINGS|TUNINGS] | replace <handle> '<bullet>' | drop <handle>"
+	usage :: "usage: brain bullet list | check '<bullet>' | write '<bullet>' [--to MEMORY|LEARNINGS|TUNINGS] | replace <handle> '<bullet>' [--at FILE:LINE] | drop <handle> [--at FILE:LINE] | touch <handle> [--at FILE:LINE] | show <handle> [--at FILE:LINE]"
 	if len(args) == 0 {
 		return fail(cli, usage)
 	}
@@ -44,15 +50,41 @@ cmd_bullet :: proc(cli: ^Cli, args: []string) -> int {
 		}
 		return bullet_write(cli, args[1], rel)
 	case "replace":
-		if len(args) != 3 {
+		if len(args) < 3 {
 			return fail(cli, usage)
 		}
-		return bullet_replace(cli, args[1], args[2])
+		at, ok := at_flag(args[3:])
+		if !ok {
+			return fail(cli, usage)
+		}
+		return bullet_replace(cli, args[1], args[2], at)
 	case "drop":
-		if len(args) != 2 {
+		if len(args) < 2 {
 			return fail(cli, usage)
 		}
-		return bullet_drop(cli, args[1])
+		at, ok := at_flag(args[2:])
+		if !ok {
+			return fail(cli, usage)
+		}
+		return bullet_drop(cli, args[1], at)
+	case "touch":
+		if len(args) < 2 {
+			return fail(cli, usage)
+		}
+		at, ok := at_flag(args[2:])
+		if !ok {
+			return fail(cli, usage)
+		}
+		return bullet_touch(cli, args[1], at)
+	case "show":
+		if len(args) < 2 {
+			return fail(cli, usage)
+		}
+		at, ok := at_flag(args[2:])
+		if !ok {
+			return fail(cli, usage)
+		}
+		return bullet_show(cli, args[1], at)
 	}
 	return fail(cli, usage)
 }
@@ -226,11 +258,11 @@ bullet_write :: proc(cli: ^Cli, line, rel: string) -> int {
 
 // bullet_replace puts line in the place of the bullet named handle; its
 // own handle may differ, if no other bullet has that one.
-bullet_replace :: proc(cli: ^Cli, handle, line: string) -> int {
+bullet_replace :: proc(cli: ^Cli, handle, line, place: string) -> int {
 	if err := ensure_db(cli); err != "" {
 		return fail(cli, err)
 	}
-	file, at, _, lerr := locate_bullet(cli, handle)
+	file, at, lerr := bullet_place(cli, handle, place)
 	if lerr != "" {
 		return fail(cli, lerr)
 	}
@@ -256,11 +288,11 @@ bullet_replace :: proc(cli: ^Cli, handle, line: string) -> int {
 // bullet_drop takes the bullet named handle out of its file and keeps it
 // in AI/DROPPED.md, so what was dropped stays on record and is not
 // proposed again.
-bullet_drop :: proc(cli: ^Cli, handle: string) -> int {
+bullet_drop :: proc(cli: ^Cli, handle, place: string) -> int {
 	if err := ensure_db(cli); err != "" {
 		return fail(cli, err)
 	}
-	file, at, _, lerr := locate_bullet(cli, handle)
+	file, at, lerr := bullet_place(cli, handle, place)
 	if lerr != "" {
 		return fail(cli, lerr)
 	}
@@ -280,6 +312,67 @@ bullet_drop :: proc(cli: ^Cli, handle: string) -> int {
 		return fail(cli, err)
 	}
 	return bullet_report(cli, "dropped", handle, file, at, {}, {})
+}
+
+// bullet_touch dates the bullet named handle today: it was checked and
+// still holds, so it is no longer stale.
+bullet_touch :: proc(cli: ^Cli, handle, place: string) -> int {
+	if err := ensure_db(cli); err != "" {
+		return fail(cli, err)
+	}
+	file, at, lerr := bullet_place(cli, handle, place)
+	if lerr != "" {
+		return fail(cli, lerr)
+	}
+	text, _ := read_text(path.join(cli.vault, file))
+	lines := strings.split_lines(text)
+	if at < 1 || at > len(lines) {
+		return fail(cli, fmt.aprintf("%s has no line %d; reindex and try again", file, at))
+	}
+	old := strings.trim_right_space(lines[at - 1])
+	b, ok := parse_bullet(old, "")
+	if !ok || !strings.has_suffix(old, b.date) {
+		return fail(cli, fmt.aprintf("%s:%d does not end in its date", file, at))
+	}
+	line := strings.concatenate({old[:len(old) - len(b.date)], today_iso()})
+	if err := set_line(cli, file, at, handle, line); err != "" {
+		return fail(cli, err)
+	}
+	if err := sync(cli, quiet = true); err != "" {
+		return fail(cli, err)
+	}
+	return bullet_report(cli, "touched", handle, file, at, {}, {})
+}
+
+// at_flag reads an optional --at FILE:LINE from rest, which must hold
+// nothing else.
+at_flag :: proc(rest: []string) -> (place: string, ok: bool) {
+	switch len(rest) {
+	case 0:
+		return "", true
+	case 2:
+		return rest[1], rest[0] == "--at"
+	}
+	return "", false
+}
+
+// bullet_place is the file and line of the bullet named handle: the one
+// at place, FILE:LINE, when it is given, which set_line checks still
+// holds that handle; else the one bullet so named.
+bullet_place :: proc(cli: ^Cli, handle, place: string) -> (file: string, line: int, err: string) {
+	if place == "" {
+		file, line, _, err = locate_bullet(cli, handle)
+		return
+	}
+	i := strings.last_index_byte(place, ':')
+	if i <= 0 {
+		return "", 0, fmt.aprintf("--at wants FILE:LINE, got %s", place)
+	}
+	n, ok := strconv.parse_int(place[i + 1:])
+	if !ok || n < 1 {
+		return "", 0, fmt.aprintf("--at wants FILE:LINE, got %s", place)
+	}
+	return place[:i], n, ""
 }
 
 // set_line rewrites line at of file, which must still be the bullet named
