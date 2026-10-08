@@ -212,6 +212,39 @@ propose_line :: proc(cli: ^Cli, line: string, force := false) -> int {
 	return inbox_write(cli, line, b)
 }
 
+// proposal_fate is what proposing line would do, writing nothing: "new"
+// when it would be proposed; else "refused" (not a bullet, or the guard
+// stops it), "restates" (the vault says it already), "dropped" (a person
+// dropped the same fact) or "waiting" (its handle is in the inbox).
+proposal_fate :: proc(cli: ^Cli, line: string) -> string {
+	b, ok := parse_bullet(line, "")
+	if !ok {
+		return "refused"
+	}
+	guard: Guard
+	guard_init(&guard, worktree_strict(cli.vault))
+	defer guard_destroy(&guard)
+	if guard_line(&guard, line) != "" || scratch_path(line) != "" {
+		return "refused"
+	}
+	if dup := restating_bullet(cli, b); dup.handle != "" {
+		return "restates"
+	}
+	dropped, _ := read_text(path.join(cli.vault, DROPPED_FILE))
+	for l in strings.split_lines(dropped) {
+		if d, dok := parse_bullet(l, ""); dok && d.handle == b.handle && d.fact == b.fact {
+			return "dropped"
+		}
+	}
+	waiting, _ := read_text(path.join(cli.vault, INBOX_FILE))
+	for l in strings.split_lines(waiting) {
+		if q, qok := parse_bullet(l, ""); qok && q.handle == b.handle {
+			return "waiting"
+		}
+	}
+	return "new"
+}
+
 // inbox_write appends a parsed bullet to the inbox unless a person dropped
 // the same fact before or the same handle is already waiting; tend's
 // hygiene items take this path too, past the checks a fact gets.

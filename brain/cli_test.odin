@@ -743,12 +743,14 @@ import_proposes_claude_memories_and_lists :: proc(t: ^testing.T) {
 	testing.expect_value(t, path.mkdirs(mem), nil)
 	testing.expect_value(t, path.write(path.join(mem, "MEMORY.md"), "- [Canonical remote](canonical-remote.md) — the hook\n- [Loose](nowhere.md) — just the hook\nnot a memory\n"), nil)
 	testing.expect_value(t, path.write(path.join(mem, "canonical-remote.md"), "---\nname: canonical-remote\ndescription: d\nmetadata:\n  type: user\n---\n\nUse the forge\nfor remotes.\n"), nil)
+	// A transcript of the project names it.
+	testing.expect_value(t, path.write(path.join(path.dir(mem), "s.jsonl"), strings.concatenate({`{"type":"user","cwd":"`, repo, `"}`, "\n"})), nil)
 	o, _, code := exec(f.cli, "import", "claude")
 	testing.expect_value(t, code, 0)
 	testing.expect(t, strings.contains(o, "2 proposal(s) from 2 memories"), o)
 	inbox, _ := path.read(path.join(f.vault, INBOX_FILE))
-	testing.expect(t, strings.contains(inbox, "- **Canonical remote** — Use the forge for remotes. — claude memory (user) — "), inbox)
-	testing.expect(t, strings.contains(inbox, "- **Loose** — just the hook — claude memory — "), inbox)
+	testing.expect(t, strings.contains(inbox, "- **Canonical remote** — Use the forge for remotes. — claude memory (user) in sqlite — "), inbox)
+	testing.expect(t, strings.contains(inbox, "- **Loose** — just the hook — claude memory in sqlite — "), inbox)
 	list := path.join(f.root, "notes.md")
 	testing.expect_value(t, path.write(list, "# Notes\n\n- the build needs the jm submodule checked out.\n* second one\n- **kept** (aliases: k) — as it is\n"), nil)
 	o, _, code = exec(f.cli, "import", list)
@@ -1034,4 +1036,65 @@ lookups_survive_rebuilds_at_once :: proc(t: ^testing.T) {
 	logdb, _ := open_db(f.cli.log_db)
 	defer sqlite3.close(&logdb)
 	testing.expect_value(t, scalar_int(logdb, "select count(*) from queries where q='sqlite'"), N * 5)
+}
+
+// Import lists every source on the machine with what is new in it, takes
+// every Claude project's memories and Gemini's at once, and proposes
+// nothing a second time.
+@(test)
+import_lists_sources_and_proposes_only_what_is_new :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	for name in ([2]string{"alpha", "beta"}) {
+		mem := path.join(f.home, ".claude", "projects", strings.concatenate({"-src-", name}), "memory")
+		testing.expect_value(t, path.mkdirs(mem), nil)
+		testing.expect_value(t, path.write(path.join(mem, "MEMORY.md"), strings.concatenate({"- [", name, " rule](r.md) — the ", name, " hook\n"})), nil)
+	}
+	gemini := path.join(f.home, ".gemini", "GEMINI.md")
+	testing.expect_value(t, path.write(gemini, "# Me\n\nprose\n\n## Gemini Added Memories\n- The user prefers tabs over spaces in Odin.\n- Releases are tagged dev-YYYY-MM.\n\n## Other\n- not a memory\n"), nil)
+
+	o, e, code := exec(f.cli, "--json", "import", "--list")
+	testing.expect_value(t, code, 0)
+	List :: struct {
+		sources: []struct {
+			kind, label, path: string,
+			memories, new:     int,
+		},
+	}
+	l: List
+	testing.expect(t, json.unmarshal_string(o, &l) == nil, e)
+	testing.expect_value(t, len(l.sources), 3)
+	if len(l.sources) == 3 {
+		testing.expect_value(t, l.sources[0].kind, "claude")
+		testing.expect_value(t, l.sources[0].label, "-src-alpha")
+		testing.expect_value(t, l.sources[2].kind, "gemini")
+		testing.expect_value(t, l.sources[2].memories, 2)
+		testing.expect_value(t, l.sources[2].new, 2)
+	}
+
+	o, _, code = exec(f.cli, "import", "claude", "--all")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "2 proposal(s) from 2 memories in 2 source(s)"), o)
+	o, _, code = exec(f.cli, "import", "gemini")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "2 proposal(s)"), o)
+	inbox, _ := path.read(path.join(f.vault, INBOX_FILE))
+	testing.expect(t, strings.contains(inbox, "- **The user prefers tabs over** — The user prefers tabs over spaces in Odin. — gemini memory — "), inbox)
+	testing.expect(t, !strings.contains(inbox, "not a memory"), "only the section")
+
+	// Again: everything is waiting already, so nothing is proposed and
+	// the list says nothing is new.
+	o, _, code = exec(f.cli, "import", "claude", "--all")
+	testing.expect(t, strings.contains(o, "0 proposal(s) from 2 memories"), o)
+	o, _, _ = exec(f.cli, "--json", "import", "--list")
+	l = {}
+	testing.expect(t, json.unmarshal_string(o, &l) == nil)
+	for src in l.sources {
+		testing.expect_value(t, src.new, 0)
+	}
+	// One source by its path.
+	o, _, code = exec(f.cli, "--json", "import", gemini)
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, `"proposed":0`), o)
 }
