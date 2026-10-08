@@ -69,6 +69,29 @@ answer :: proc(p: ^ui.Probe, m: ^Model) {
 		title = "Dedicated workspace per project",
 		turns = {{id = "a0", ts = "2026-09-22T13:02:00Z", role = "user", body = LONG}, {id = "85801a30", ts = "2026-09-22T13:05:00Z", role = "assistant", body = LONG, hit = true}},
 	})
+	ui.probe_deliver(p, shapes.Bullet_Show{handle = "jm:ui menu steals focus back", at = "AI/MEMORY.md:8"}, shapes.Bullet_Show_Result {
+		file = "AI/MEMORY.md",
+		line = 8,
+		handle = "jm:ui menu steals focus back",
+		served = {times = 1234, sessions = 210, top = 400, first = "2026-09-01 10:00:00", last = "2026-10-08 10:00:00", callers = {{caller = "claude", times = 1200}, {caller = "pi", times = 34}}, queries = {{query = LONG, times = 900}, {query = "focus", times = 334}}, days = {{day = "2026-10-07", times = 30}, {day = "2026-10-08", times = 40}}},
+		claims = {{kind = "path", text = "~/Source/Personal/sonar/gui/view/actions.odin", verdict = "passed", checked = "2026-10-08"}},
+		history = {{commit = "eaa5237", date = "2026-10-02", subject = "sync: 2 files from omarchy", files = {"AI/INBOX.md", "AI/MEMORY.md"}}},
+		proposed = {ts = "2026-10-02T20:50:08Z", agent = "claude", session = "s1", title = LONG, turn = "t1"},
+	})
+	ui.probe_deliver(p, shapes.Spend{days = 30}, shapes.Spend_Result {
+		days = 30,
+		cost = 2463.4,
+		unpriced = 1_661_670_548,
+		sessions = 396,
+		by_day = {{name = "2026-09-20", cost = 260}, {name = "2026-10-08", cost = 420}},
+		by_agent = {{name = "claude", cost = 2463, sessions = 367, tokens = 5_257_000_000}, {name = "pi", sessions = 29, tokens = 91_000_000, priced = true}},
+		by_model = {{name = "claude-opus-5-5", cost = 1335, tokens = 2_011_000_000, priced = true}, {name = "claude-fable-5-1", tokens = 1_661_670_548}},
+		served = 985_000,
+		served_cost = 4.93,
+		lookups = 1380,
+		answered = 1147,
+		finds = {hits = 155, misses = 17, hit_cost = 0.2, miss_cost = 0.36, saved = 24.75, enough = true},
+	})
 	ui.probe_deliver(p, shapes.Recall{terms = "harfbuzz shaping cluster", limit = 10}, shapes.Recall_Result{turns = {{id = "x1", date = "2026-09-25", agent = "claude", title = "Text shaping", snippet = LONG}}})
 }
 
@@ -86,6 +109,7 @@ VARIANTS := [?]Variant {
 	{"rail at its widest", proc(m: ^Model) {m.nav_width = NAV_MAX}},
 	{"thin aliases chosen", proc(m: ^Model) {m.findings, m.findings_chosen = .Thin_Aliases, true}},
 	{"no search", proc(m: ^Model) {ui.text_set(&m.search, "")}},
+	{"a bullet's provenance", proc(m: ^Model) {m.bullet_tab = 1}},
 	{"every proposal ticked", proc(m: ^Model) {
 		for h in ([3]string{"jm:ui menu steals focus back", "init_context threads own their temp allocator", "brain doctor contradictions dropped"}) {
 			select(m, h, true)

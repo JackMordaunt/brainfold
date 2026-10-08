@@ -46,6 +46,9 @@ Query :: union {
 	shapes.Inbox,
 	shapes.Bullets,
 	shapes.Bullet_Check,
+	shapes.Bullet_Show,
+	shapes.Spend,
+	shapes.Import_Sources,
 	shapes.Install_Plan,
 	shapes.Vault,
 }
@@ -117,6 +120,20 @@ read :: proc(c: ^Client, q: Query, allocator := context.allocator) -> []byte {
 		return marshal(r, allocator)
 	case shapes.Bullet_Check:
 		return marshal(check(c, q.line), allocator)
+	case shapes.Import_Sources:
+		r: shapes.Import_Sources_Result
+		r.error = call(c, {"--json", "import", "--list"}, &r)
+		return marshal(r, allocator)
+	case shapes.Spend:
+		r: shapes.Spend_Result
+		r.error = call(c, {"--json", "spend", "--days", fmt.aprint(q.days > 0 ? q.days : 30)}, &r)
+		return marshal(r, allocator)
+	case shapes.Bullet_Show:
+		r: shapes.Bullet_Show_Result
+		if q.handle != "" {
+			r.error = call(c, at_args({"--json", "bullet", "show", q.handle}, q.at), &r)
+		}
+		return marshal(r, allocator)
 	case shapes.Install_Plan:
 		r: shapes.Install_Plan_Result
 		if strings.trim_space(q.path) != "" {
@@ -316,9 +333,17 @@ act :: proc(c: ^Client, cmd: shapes.Command, allocator := context.allocator) -> 
 		to := v.to != "" ? v.to : "MEMORY"
 		return edit(c, {"--json", "bullet", "write", v.line, "--to", to}, "Written")
 	case shapes.Replace_Bullet:
-		return edit(c, {"--json", "bullet", "replace", v.handle, v.line}, "Saved")
+		return edit(c, at_args({"--json", "bullet", "replace", v.handle, v.line}, v.at), "Saved")
 	case shapes.Drop_Bullet:
-		return edit(c, {"--json", "bullet", "drop", v.handle}, "Dropped")
+		return edit(c, at_args({"--json", "bullet", "drop", v.handle}, v.at), "Dropped")
+	case shapes.Touch_Bullet:
+		return edit(c, at_args({"--json", "bullet", "touch", v.handle}, v.at), "Dated today:")
+	case shapes.Import:
+		return import_sources(c, v.paths)
+	case shapes.Set_Price:
+		return step(c, {"spend", "--price", v.prefix, v.input, v.output}, fmt.aprintf("%s priced at $%s in, $%s out a million tokens", v.prefix, v.input, v.output))
+	case shapes.Unlink:
+		return step(c, {"unlink", v.file, fmt.aprint(v.line), v.target}, fmt.aprintf("[[%s]] is plain text now in %s", v.target, v.file))
 	case shapes.Set_Review:
 		if v.mode != "after" && v.mode != "before" {
 			return {done = true, message = fmt.aprintf("No review mode %q", v.mode)}
@@ -393,6 +418,43 @@ edit :: proc(c: ^Client, args: []string, done: string) -> shapes.Outcome_Result 
 		return {done = true, ok = true, message = fmt.aprintf("%s %s at %s:%d", done, r.handle, r.file, r.line)}
 	}
 	return {done = true, ok = true, message = fmt.aprintf("%s %s", done, r.handle)}
+}
+
+// import_sources imports each path in turn and says how many memories
+// were proposed, or the first that failed.
+@(private)
+import_sources :: proc(c: ^Client, paths: []string) -> shapes.Outcome_Result {
+	Report :: struct {
+		memories, proposed: int,
+	}
+	proposed, memories := 0, 0
+	for p in paths {
+		r: Report
+		if err := call(c, {"--json", "import", p}, &r); err != "" {
+			return {done = true, message = err}
+		}
+		proposed += r.proposed
+		memories += r.memories
+	}
+	switch {
+	case proposed == 0:
+		return {done = true, ok = true, message = fmt.aprintf("Nothing new in %d memories: the vault has them already", memories)}
+	case proposed == 1:
+		return {done = true, ok = true, message = "1 memory proposed; it waits in the inbox"}
+	}
+	return {done = true, ok = true, message = fmt.aprintf("%d memories proposed; they wait in the inbox", proposed)}
+}
+
+// at_args is args, then --at at when a bullet's place is named.
+@(private)
+at_args :: proc(args: []string, at: string) -> []string {
+	if at == "" {
+		return args
+	}
+	out := make([dynamic]string)
+	append(&out, ..args)
+	append(&out, "--at", at)
+	return out[:]
 }
 
 // place_of finds a proposal's place in the inbox now, by its handle.

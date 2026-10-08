@@ -160,3 +160,55 @@ a_batch_finds_each_by_handle :: proc(t: ^testing.T) {
 	testing.expect(t, !part.ok)
 	testing.expect_value(t, part.message, "Dropped 0 of 2; gone is no longer in the inbox")
 }
+
+// A bullet's provenance is asked for by its place, and a proposal the
+// CLI reports as null reads as none.
+@(test)
+a_provenance_is_read_by_place :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["--json bullet show twin --at AI/MEMORY.md:4"] = `{"file":"AI/MEMORY.md","line":4,"handle":"twin","fact":"a fact","source":"","date":"2026-01-01","served":{"times":3,"sessions":2,"top":1,"used":0,"first":"2026-10-01 10:00:00","last":"2026-10-08 11:00:00","callers":[{"caller":"claude","times":3}],"queries":[{"query":"twin","times":3,"last":"2026-10-08 11:00:00"}],"days":[{"day":"2026-10-08","times":3}]},"claims":[{"kind":"path","text":"~/x","verdict":"failed","why":"not on this machine","checked":"2026-10-08"}],"history":[{"commit":"eaa5237","date":"2026-10-02","subject":"sync: 2 files from omarchy","files":["AI/MEMORY.md"]}],"proposed":null}`
+	r := decode(t, read(&client, shapes.Bullet_Show{handle = "twin", at = "AI/MEMORY.md:4"}, context.temp_allocator), shapes.Bullet_Show_Result)
+	testing.expect_value(t, r.error, "")
+	testing.expect_value(t, r.served.times, 3)
+	testing.expect_value(t, r.served.callers[0].caller, "claude")
+	testing.expect_value(t, r.served.days[0].times, 3)
+	testing.expect_value(t, r.claims[0].verdict, "failed")
+	testing.expect_value(t, r.history[0].files[0], "AI/MEMORY.md")
+	testing.expect_value(t, r.proposed.session, "")
+	// Without a place, none is passed.
+	c.answers["--json bullet show solo"] = `{"file":"AI/MEMORY.md","line":2,"handle":"solo","served":{"times":0},"claims":[],"history":[],"proposed":{"ts":"2026-10-02T20:50:08Z","agent":"claude","session":"s1","title":"Why","turn":"t1"}}`
+	r = decode(t, read(&client, shapes.Bullet_Show{handle = "solo"}, context.temp_allocator), shapes.Bullet_Show_Result)
+	testing.expect_value(t, r.error, "")
+	testing.expect_value(t, r.proposed.turn, "t1")
+}
+
+@(test)
+spend_is_read_for_its_window :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["--json spend --days 7"] = `{"days":7,"since":"2026-10-01","cost":12.5,"unpriced":100,"replies":40,"sessions":3,"by_day":[{"name":"2026-10-08","cost":12.5,"tokens":900,"sessions":3,"priced":true}],"by_agent":[],"by_model":[{"name":"claude-fable-5-1","cost":0,"tokens":100,"sessions":0,"priced":false}],"served":2000,"served_cost":0.01,"lookups":9,"answered":8,"finds":{"hits":6,"misses":5,"hit_cost":0.2,"miss_cost":0.35,"hit_calls":3,"miss_calls":5,"saved":0.9,"enough":true}}`
+	r := decode(t, read(&client, shapes.Spend{days = 7}, context.temp_allocator), shapes.Spend_Result)
+	testing.expect_value(t, r.error, "")
+	testing.expect_value(t, r.cost, 12.5)
+	testing.expect_value(t, r.by_model[0].priced, false)
+	testing.expect_value(t, r.finds.hits, 6)
+	testing.expect(t, r.finds.enough)
+	testing.expect_value(t, r.finds.saved, 0.9)
+}
+
+@(test)
+an_import_takes_each_source_and_counts_what_it_proposed :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["--json import /a/memory"] = `{"sources":1,"memories":4,"proposed":3}`
+	c.answers["--json import /b/GEMINI.md"] = `{"sources":1,"memories":2,"proposed":2}`
+	o := act(&client, shapes.Import{id = 1, paths = {"/a/memory", "/b/GEMINI.md"}}, context.temp_allocator)
+	testing.expect(t, o.ok)
+	testing.expect_value(t, o.message, "5 memories proposed; they wait in the inbox")
+	c.answers["--json import /a/memory"] = `{"sources":1,"memories":4,"proposed":0}`
+	o = act(&client, shapes.Import{id = 2, paths = {"/a/memory"}}, context.temp_allocator)
+	testing.expect_value(t, o.message, "Nothing new in 4 memories: the vault has them already")
+	o = act(&client, shapes.Import{id = 3, paths = {"/missing"}}, context.temp_allocator)
+	testing.expect(t, !o.ok)
+}

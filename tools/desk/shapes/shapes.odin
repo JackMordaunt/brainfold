@@ -115,6 +115,7 @@ Doctor_Result :: struct {
 // on the list it is in.
 Finding :: struct {
 	file:     string,
+	files:    string, // a duplicate's: each file holding the handle, "A + B"
 	handle:   string,
 	aliases:  string,
 	date:     string,
@@ -236,6 +237,154 @@ Bullet :: struct {
 	date:    string,
 }
 
+// Import_Sources is `brain import --list`: every place an agent on this
+// machine keeps memories. gen is asked again after an import.
+Import_Sources :: struct {
+	gen: int,
+}
+
+Import_Sources_Result :: struct {
+	sources: []Import_Source,
+	error:   string,
+}
+
+// Import_Source is one place an agent's memories are kept.
+Import_Source :: struct {
+	kind:     string, // "claude", "gemini" or "file"
+	label:    string, // the project, or the file
+	path:     string, // what brain import is given to take it
+	memories: int,
+	new:      int, // not in the vault, the inbox or the dropped list
+}
+
+// Spend is `brain spend`: what the agents cost over the last days, from
+// their transcripts, and what the vault did to it. gen is asked again
+// after a price is set, since the answer then changes under the same days.
+Spend :: struct {
+	days: int,
+	gen:  int,
+}
+
+Spend_Result :: struct {
+	days:        int,
+	since:       string,
+	cost:        f64, // dollars, the priced replies'
+	input:       i64,
+	written:     i64,
+	read:        i64,
+	output:      i64,
+	unpriced:    i64, // tokens on models with no price
+	replies:     int,
+	sessions:    int,
+	by_day:      []Spend_Row,
+	by_agent:    []Spend_Row,
+	by_model:    []Spend_Row,
+	served:      i64, // tokens the vault put into sessions
+	served_cost: f64,
+	lookups:     int,
+	answered:    int,
+	finds:       Finds,
+	error:       string,
+}
+
+// Spend_Row is spend under one name: a day, an agent or a model.
+Spend_Row :: struct {
+	name:     string,
+	cost:     f64,
+	tokens:   i64,
+	sessions: int,
+	priced:   bool, // every reply under it had a price
+}
+
+// Finds is what agents spent finishing a reply after an explicit find
+// that answered, and one that missed: medians, observed.
+Finds :: struct {
+	hits:       int,
+	misses:     int,
+	hit_cost:   f64,
+	miss_cost:  f64,
+	hit_calls:  f64,
+	miss_calls: f64,
+	saved:      f64, // dollars, when enough
+	enough:     bool, // enough finds of each kind to say
+}
+
+// Bullet_Show is `brain bullet show`: one bullet and where it came from,
+// the bullet at at (FILE:LINE) when two share its handle.
+Bullet_Show :: struct {
+	handle: string,
+	at:     string,
+}
+
+Bullet_Show_Result :: struct {
+	file:     string,
+	line:     int,
+	handle:   string,
+	fact:     string,
+	source:   string,
+	date:     string,
+	served:   Usage,
+	claims:   []Claim,
+	history:  []Change,
+	proposed: Origin, // empty session when no transcript here holds the proposal
+	error:    string,
+}
+
+// Usage is how a bullet has been used: every query that returned it.
+Usage :: struct {
+	times:    int,
+	sessions: int,
+	top:      int, // times it was the first answer
+	used:     int, // times brain learn judged the agent used it
+	first:    string,
+	last:     string,
+	callers:  []Caller_Count,
+	queries:  []Query_Count,
+	days:     []Day_Count, // the last 30 days with a serve
+}
+
+Caller_Count :: struct {
+	caller: string,
+	times:  int,
+}
+
+Query_Count :: struct {
+	query: string,
+	times: int,
+	last:  string,
+}
+
+Day_Count :: struct {
+	day:   string,
+	times: int,
+}
+
+// Claim is what brain verify found of one thing a bullet names.
+Claim :: struct {
+	kind:    string,
+	text:    string,
+	verdict: string,
+	why:     string,
+	checked: string,
+}
+
+// Change is a vault commit that added, changed or removed a bullet.
+Change :: struct {
+	commit:  string,
+	date:    string,
+	subject: string,
+	files:   []string,
+}
+
+// Origin is the agent turn that proposed a bullet.
+Origin :: struct {
+	ts:      string,
+	agent:   string,
+	session: string,
+	title:   string,
+	turn:    string, // a turn id, for Around
+}
+
 // Bullet_Check is `brain bullet check <line>`: what lint would say of a
 // bullet before it is written, asked as it is typed.
 Bullet_Check :: struct {
@@ -288,6 +437,10 @@ Command :: union {
 	Write_Bullet,
 	Replace_Bullet,
 	Drop_Bullet,
+	Touch_Bullet,
+	Unlink,
+	Set_Price,
+	Import,
 	Set_Vault,
 }
 
@@ -352,12 +505,47 @@ Replace_Bullet :: struct {
 	id:     u64,
 	handle: string,
 	line:   string,
+	at:     string, // FILE:LINE, naming which where two bullets share the handle; "" when one has it
 }
 
 // Drop_Bullet takes the bullet named handle out of the vault.
 Drop_Bullet :: struct {
 	id:     u64,
 	handle: string,
+	at:     string, // as Replace_Bullet's
+}
+
+// Touch_Bullet dates the bullet named handle today: it was checked and
+// still holds.
+Touch_Bullet :: struct {
+	id:     u64,
+	handle: string,
+	at:     string, // as Replace_Bullet's
+}
+
+// Unlink makes every [[target]] on a line of a note plain text: a link
+// that leads nowhere.
+Unlink :: struct {
+	id:     u64,
+	file:   string,
+	line:   int,
+	target: string,
+}
+
+// Set_Price sets a model's dollars per million input and output tokens,
+// for every model whose id starts with prefix.
+Set_Price :: struct {
+	id:     u64,
+	prefix: string,
+	input:  string,
+	output: string,
+}
+
+// Import proposes the memories of each source path into the inbox; what
+// the vault already holds is not proposed again.
+Import :: struct {
+	id:    u64,
+	paths: []string,
 }
 
 // Set_Vault binds this machine to the vault at path, as brain install
@@ -396,6 +584,14 @@ command_id :: proc(c: Command) -> u64 {
 	case Replace_Bullet:
 		return v.id
 	case Drop_Bullet:
+		return v.id
+	case Touch_Bullet:
+		return v.id
+	case Unlink:
+		return v.id
+	case Set_Price:
+		return v.id
+	case Import:
 		return v.id
 	case Set_Vault:
 		return v.id

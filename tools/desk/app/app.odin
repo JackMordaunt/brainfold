@@ -54,6 +54,9 @@ Kind :: enum u8 {
 	Bullets,
 	Check,
 	Plan,
+	Show,
+	Spend,
+	Imports,
 }
 
 // Read is one need to answer: what to ask, under which key. A recall's
@@ -241,6 +244,24 @@ read_of :: proc(need: ui.Need) -> (r: Read, ok: bool) {
 		}
 		r.kind = .Check
 		r.terms_len = copy(r.terms[:], q.line)
+	case ui.need_is(need, shapes.Import_Sources):
+		r.kind = .Imports
+	case ui.need_is(need, shapes.Spend):
+		q, qok := ui.need_as(need, shapes.Spend)
+		if !qok {
+			return {}, false
+		}
+		r.kind = .Spend
+		r.limit = q.days
+	case ui.need_is(need, shapes.Bullet_Show):
+		q, qok := ui.need_as(need, shapes.Bullet_Show)
+		if !qok {
+			return {}, false
+		}
+		r.kind = .Show
+		// One buffer holds both: the place, a separator no path or handle
+		// has, the handle.
+		r.terms_len = copy(r.terms[:], strings.concatenate({q.at, "\x1f", q.handle}, context.temp_allocator))
 	case ui.need_is(need, shapes.Around):
 		q, qok := ui.need_as(need, shapes.Around)
 		if !qok {
@@ -293,9 +314,17 @@ clone_command :: proc(c: shapes.Command, allocator: mem.Allocator) -> shapes.Com
 	case shapes.Write_Bullet:
 		return shapes.Write_Bullet{v.id, strings.clone(v.line, allocator), strings.clone(v.to, allocator)}
 	case shapes.Replace_Bullet:
-		return shapes.Replace_Bullet{v.id, strings.clone(v.handle, allocator), strings.clone(v.line, allocator)}
+		return shapes.Replace_Bullet{v.id, strings.clone(v.handle, allocator), strings.clone(v.line, allocator), strings.clone(v.at, allocator)}
 	case shapes.Drop_Bullet:
-		return shapes.Drop_Bullet{v.id, strings.clone(v.handle, allocator)}
+		return shapes.Drop_Bullet{v.id, strings.clone(v.handle, allocator), strings.clone(v.at, allocator)}
+	case shapes.Touch_Bullet:
+		return shapes.Touch_Bullet{v.id, strings.clone(v.handle, allocator), strings.clone(v.at, allocator)}
+	case shapes.Import:
+		return shapes.Import{v.id, clone_strings(v.paths, allocator)}
+	case shapes.Set_Price:
+		return shapes.Set_Price{v.id, strings.clone(v.prefix, allocator), strings.clone(v.input, allocator), strings.clone(v.output, allocator)}
+	case shapes.Unlink:
+		return shapes.Unlink{v.id, strings.clone(v.file, allocator), v.line, strings.clone(v.target, allocator)}
 	case shapes.Set_Vault:
 		return shapes.Set_Vault{v.id, strings.clone(v.path, allocator)}
 	case shapes.Sync_Now, shapes.Reindex, shapes.Run_Doctor:
@@ -343,8 +372,22 @@ free_command :: proc(c: shapes.Command, allocator: mem.Allocator) {
 	case shapes.Replace_Bullet:
 		delete(v.handle, allocator)
 		delete(v.line, allocator)
+		delete(v.at, allocator)
 	case shapes.Drop_Bullet:
 		delete(v.handle, allocator)
+		delete(v.at, allocator)
+	case shapes.Touch_Bullet:
+		delete(v.handle, allocator)
+		delete(v.at, allocator)
+	case shapes.Import:
+		free_strings(v.paths, allocator)
+	case shapes.Set_Price:
+		delete(v.prefix, allocator)
+		delete(v.input, allocator)
+		delete(v.output, allocator)
+	case shapes.Unlink:
+		delete(v.file, allocator)
+		delete(v.target, allocator)
 	case shapes.Set_Vault:
 		delete(v.path, allocator)
 	}
@@ -379,13 +422,14 @@ tick :: proc(_: time.Duration) -> Refresh {
 }
 
 // refresh is a read for every live need but a recall, whose answer does
-// not move under it, and doctor, which takes a second or more and runs
-// when the person asks (Run_Doctor). The slice lives until the next call.
+// not move under it, and doctor and spend, which take a second or more:
+// doctor runs when the person asks (Run_Doctor), spend when its page
+// opens or a price is set. The slice lives until the next call.
 refresh :: proc(h: ^Host, _: Refresh) -> []Read {
 	clear(&h.reads)
 	sync.mutex_lock(&h.mutex)
 	for _, r in h.live {
-		if r.kind != .Recall && r.kind != .Around && r.kind != .Doctor && r.kind != .Check && r.kind != .Plan {
+		if r.kind != .Recall && r.kind != .Around && r.kind != .Doctor && r.kind != .Check && r.kind != .Plan && r.kind != .Spend && r.kind != .Imports {
 			append(&h.reads, r)
 			h.pending += 1
 		}
@@ -422,6 +466,14 @@ read_one :: proc(h: ^Host, r: Read) -> Read_Done {
 	case .Plan:
 		path := r.terms
 		q = shapes.Install_Plan{path = string(path[:r.terms_len])}
+	case .Spend:
+		q = shapes.Spend{days = r.limit}
+	case .Imports:
+		q = shapes.Import_Sources{}
+	case .Show:
+		both := r.terms
+		at, _, handle := strings.partition(string(both[:r.terms_len]), "\x1f")
+		q = shapes.Bullet_Show{handle = handle, at = at}
 	}
 	return {r.key, r.kind, cli.read(&h.client, q, h.allocator)}
 }
@@ -431,8 +483,14 @@ read_one :: proc(h: ^Host, r: Read) -> Read_Done {
 deliver :: proc(h: ^Host, d: Read_Done) {
 	defer delete(d.data, h.allocator)
 	sum := hash.fnv64a(d.data)
+	// Pending until the answer is in the inbox: a host that counts none
+	// pending has delivered everything it read.
+	defer {
+		sync.mutex_lock(&h.mutex)
+		h.pending -= 1
+		sync.mutex_unlock(&h.mutex)
+	}
 	sync.mutex_lock(&h.mutex)
-	h.pending -= 1
 	_, live := h.live[d.key]
 	last, sent := h.sent[d.key]
 	fresh := live && d.data != nil && !(sent && last == sum)
@@ -463,11 +521,12 @@ act_one :: proc(h: ^Host, a: Act) -> Act_Done {
 		return run_doctor(h, a, mem.dynamic_arena_allocator(&arena))
 	}
 	o := cli.act(&h.client, a.cmd, mem.dynamic_arena_allocator(&arena))
-	// An alias changes what doctor finds thin: the report is made again,
-	// and the page shows the bullet's new names and the list without it.
+	// An edit changes what doctor finds: while the report is shown, it is
+	// made again, so the page shows the vault as the edit left it and
+	// a fixed finding leaves its list.
 	#partial switch _ in a.cmd {
-	case shapes.Add_Alias, shapes.Remove_Alias:
-		if o.ok {
+	case shapes.Approve, shapes.Drop, shapes.Add_Alias, shapes.Remove_Alias, shapes.Write_Bullet, shapes.Replace_Bullet, shapes.Drop_Bullet, shapes.Touch_Bullet, shapes.Unlink:
+		if o.ok && doctor_shown(h) {
 			d := run_doctor(h, a, mem.dynamic_arena_allocator(&arena))
 			delete(d.outcome.message, h.allocator)
 			return {act = a, outcome = {done = true, ok = true, message = strings.clone(o.message, h.allocator)}, doctor = d.doctor}
@@ -475,6 +534,19 @@ act_one :: proc(h: ^Host, a: Act) -> Act_Done {
 	}
 	o.message = strings.clone(o.message, h.allocator)
 	return {act = a, outcome = o}
+}
+
+// doctor_shown is whether the view needs the doctor report now.
+doctor_shown :: proc(h: ^Host) -> bool {
+	// The key is made in a buffer here: a worker's own temp allocator is
+	// never freed.
+	buf: [1024]byte
+	arena: mem.Arena
+	mem.arena_init(&arena, buf[:])
+	context.temp_allocator = mem.arena_allocator(&arena)
+	sync.mutex_lock(&h.mutex)
+	defer sync.mutex_unlock(&h.mutex)
+	return ui.key_of(shapes.Doctor{}) in h.live
 }
 
 // settle, on a pool thread, answers the command's Outcome and has every

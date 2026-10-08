@@ -59,6 +59,7 @@ page_inbox :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	inbox, st := ui.need(gtx, shapes.Inbox{}, shapes.Inbox_Result)
 	// Drawn last, over the panes.
 	defer bulk_confirm(gtx, m)
+	defer import_dialog(gtx, m)
 	arrange(gtx, m)
 	w := split_list(gtx, m)
 	if !ready(st) {
@@ -84,7 +85,7 @@ page_inbox :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			return
 		}
 		if len(ps) == 0 {
-			empty(gtx, "Nothing waiting", "When an agent proposes a fact, it waits here for you.", .Inbox)
+			empty(gtx, "Nothing waiting", "When an agent proposes a fact, it waits here for you. What your agents remembered on their own can be brought in with Import memories.", .Inbox)
 		}
 		ui.inset(gtx, {8, 8, 8, 8})
 		ui.column(gtx, gap = 2, align = .Fill)
@@ -286,7 +287,7 @@ FINDING_HELP := [Finding_List]string {
 	.Duplicates     = "Two bullets carry the same handle, so a find cannot tell them apart. Merge them, or give one a handle of its own.",
 	.Thin_Aliases   = "Fewer than two other names. An agent that asks in different words may miss the bullet; add the names a searcher would use.",
 	.Oversized      = "A bullet long enough to hold more than one fact. Split it, so each fact is found and dated on its own.",
-	.Orphans        = "A note under AI/artifacts that no bullet links to, so nothing leads an agent to it. Link it from a bullet, or move it out.",
+	.Orphans        = "A note under AI/artifacts that no bullet links to, so nothing leads an agent to it. Write a bullet whose source is the note, or move it out.",
 	.Promote        = "Returned by many queries across many sessions. A fact asked for that often belongs in the project's own files, where an agent reads it without a lookup.",
 	.Never_Returned = "No query has returned this bullet yet. It may be named in words nobody uses: check its handle and aliases.",
 }
@@ -395,6 +396,7 @@ doctor_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
 // item chosen in full.
 page_doctor :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	d, st := ui.need(gtx, shapes.Doctor{}, shapes.Doctor_Result)
+	fix_confirm(gtx, m)
 	arrange(gtx, m)
 	KINDS :: PANE_MIN.x
 	// Too narrow for three panes, the lists fold into a menu over the
@@ -446,25 +448,29 @@ page_doctor :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			}
 		}
 	}
-	n := finding_count(d, m.findings)
+	// The list is read once: the narrow layout's menu, drawn inside the
+	// pane, may choose another, which shows from the next frame, not
+	// halfway through this one's rows.
+	list := m.findings
+	n := finding_count(d, list)
 	// The item chosen is found by what it says; a fresh report may order
 	// the list differently, or no longer hold it, when the first is shown.
 	current := 0
 	for i in 0 ..< n {
-		if finding_key(d, m.findings, i) == chosen(&m.finding) {
+		if finding_key(d, list, i) == chosen(&m.finding) {
 			current = i
 		}
 	}
 	{
-		pane(gtx, m, .Findings, items_size, narrow ? "" : FINDING_TITLES[m.findings], n, bar = narrow ? findings_menu : nil)
+		pane(gtx, m, .Findings, items_size, narrow ? "" : FINDING_TITLES[list], n, bar = narrow ? findings_menu : nil)
 		if n == 0 {
-			empty(gtx, fmt.tprintf("No %s", strings.to_lower(FINDING_TITLES[m.findings], context.temp_allocator)), FINDING_NOTES[m.findings], .Check_Circle)
+			empty(gtx, fmt.tprintf("No %s", strings.to_lower(FINDING_TITLES[list], context.temp_allocator)), FINDING_NOTES[list], .Check_Circle)
 		} else {
-			l := primer.action_list_open(gtx, .Full, dividers = true, name = FINDING_TITLES[m.findings])
+			l := primer.action_list_open(gtx, .Full, dividers = true, name = FINDING_TITLES[list])
 			for i in 0 ..< n {
-				title, note := finding_row(d, m.findings, i)
-				if primer.action_list_item(&l, title, description = note, description_variant = .Block, truncate = true, leading = FINDING_ICONS[m.findings], active = i == current) {
-					choose(&m.finding, finding_key(d, m.findings, i))
+				title, note := finding_row(d, list, i)
+				if primer.action_list_item(&l, title, description = note, description_variant = .Block, truncate = true, leading = FINDING_ICONS[list], active = i == current) {
+					choose(&m.finding, finding_key(d, list, i))
 					m.panes[.Finding] = {}
 				}
 			}
@@ -472,12 +478,13 @@ page_doctor :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		}
 	}
 	{
-		pane(gtx, m, .Finding, detail_size)
+		m.fix.list, m.fix.at = list, current
+		pane(gtx, m, .Finding, detail_size, footer = n > 0 && has_fixes(list) ? fix_bar : nil)
 		if n == 0 {
-			empty(gtx, "Nothing to look at", FINDING_NOTES[m.findings], .Shield_Check)
+			empty(gtx, "Nothing to look at", FINDING_NOTES[list], .Shield_Check)
 			return
 		}
-		finding_detail(gtx, m, d, m.findings, current)
+		finding_detail(gtx, m, d, list, current)
 	}
 }
 
@@ -537,8 +544,15 @@ finding_detail :: proc(gtx: ^ui.Ctx, m: ^Model, d: ^shapes.Doctor_Result, l: Fin
 		case .Never_Returned:
 			f = d.never_returned[i]
 		}
-		if l == .Thin_Aliases {
+		// What an agent searches for finds a bullet by its names: a thin
+		// one or one never found is given more where it is shown.
+		if l == .Thin_Aliases || l == .Never_Returned {
 			alias_editor(gtx, m, f.handle, f.aliases)
+		}
+		// Each copy says where it is.
+		if l == .Duplicates {
+			duplicate_copies(gtx, m, f.handle)
+			return
 		}
 		rows := make([dynamic][2]string, context.temp_allocator)
 		append(&rows, [2]string{"file", f.file})
@@ -576,19 +590,23 @@ days_since :: proc(date: string) -> int {
 	return max(int(time.duration_hours(time.diff(t, time.now())) / 24), 0)
 }
 
-// age is days as a person says it.
-age :: proc(days: int) -> string {
+// age is days as a person says it: how old a thing is, "12 days old",
+// or with ago how long since it happened, short enough for a figure,
+// "12d ago"; a negative count is never.
+age :: proc(days: int, ago := false) -> string {
 	switch {
+	case days < 0:
+		return "never"
 	case days == 0:
 		return "today"
 	case days == 1:
-		return "1 day old"
+		return ago ? "yesterday" : "1 day old"
 	case days < 60:
-		return fmt.tprintf("%d days old", days)
+		return ago ? fmt.tprintf("%dd ago", days) : fmt.tprintf("%d days old", days)
 	case days < 730:
-		return fmt.tprintf("%d months old", days / 30)
+		return ago ? fmt.tprintf("%dmo ago", days / 30) : fmt.tprintf("%d months old", days / 30)
 	}
-	return fmt.tprintf("%d years old", days / 365)
+	return ago ? fmt.tprintf("%dy ago", days / 365) : fmt.tprintf("%d years old", days / 365)
 }
 
 // alias_editor is a bullet's other names, each removable, and a field
@@ -667,6 +685,28 @@ fields :: proc(gtx: ^ui.Ctx, rows: [][2]string) {
 
 // --- Vault ---------------------------------------------------------------------
 
+// file_url is path as a file: URL, which the platform opens with its file
+// manager: a Windows path's backslashes turned and a drive letter given
+// its leading slash, and the characters a URL reserves escaped.
+file_url :: proc(path: string) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, "file://")
+	if !strings.has_prefix(path, "/") {
+		strings.write_byte(&b, '/')
+	}
+	for c in transmute([]u8)path {
+		switch c {
+		case '\\':
+			strings.write_byte(&b, '/')
+		case ' ', '#', '%', '?', '"':
+			fmt.sbprintf(&b, "%%%02X", c)
+		case:
+			strings.write_byte(&b, c)
+		}
+	}
+	return strings.to_string(b)
+}
+
 // vault_control is what can be done to the vault as a whole, beside the
 // page's other controls, each with a tooltip saying what it does.
 vault_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
@@ -688,12 +728,28 @@ where_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	moving := waiting_on(m, .Set_Vault)
 	ui.row(gtx, gap = 8, align = .Center)
 	st2 := ui.stack_open(gtx)
+	// The system's own folder dialog chooses; what it would change is then
+	// shown before it is used.
 	if primer.button(gtx, "Change vault…", .Default, leading = .File_Directory, loading = moving) && !moving {
-		ui.text_set(&m.vault_path, ready(st) ? v.vault : "")
-		m.moving, m.focus_path = true, true
+		ui.pick_folder(gtx, VAULT_PICK, ready(st) ? v.vault : "")
 	}
 	primer.tooltip(gtx, "Use the vault in another folder on this machine: its notes answer every agent from then on.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 	ui.close(&st2)
+}
+
+// VAULT_PICK is the area a vault folder pick answers: the Change button
+// and the dialog's Browse both ask under it.
+VAULT_PICK :: ops.Area_Id(0x7a17_f01d)
+
+// vault_picked opens the change dialog on the folder the system dialog
+// chose; a cancel changes nothing.
+vault_picked :: proc(gtx: ^ui.Ctx, m: ^Model) {
+	for e in ui.events(gtx, VAULT_PICK) {
+		if e.kind == .Picked && e.text != "" {
+			ui.text_set(&m.vault_path, e.text)
+			m.moving = true
+		}
+	}
 }
 
 // move_dialog asks for the folder of another vault, shows what binding
@@ -719,17 +775,20 @@ move_dialog :: proc(gtx: ^ui.Ctx, m: ^Model, current: string) {
 	dl := primer.dialog_open(gtx, &m.moving, "Change vault", "The folder whose notes answer your agents on this machine.", footer, width = .Large)
 	if dl.visible {
 		ui.column(gtx, gap = 12, align = .Fill)
-		e := primer.text_input(gtx, &m.vault_path, placeholder = "/path/to/vault", leading = .File_Directory, block = true, name = "Vault folder")
-		// The field takes the focus once the dialog has placed it.
-		if m.focus_path {
-			ui.focus_request(gtx, e.id)
-			if e.focused {
-				m.focus_path = false
+		{
+			ui.row(gtx, gap = 8, align = .Center)
+			{
+				fw := max(gtx.constraints.max.x - 110, 160)
+				ui.sized(gtx, {min = {fw, 0}, max = {fw, ui.INF}})
+				primer.text_input(gtx, &m.vault_path, placeholder = "/path/to/vault", leading = .File_Directory, block = true, name = "Vault folder")
+			}
+			if primer.button(gtx, "Browse…", .Default) {
+				ui.pick_folder(gtx, VAULT_PICK, path != "" ? path : current)
 			}
 		}
 		switch {
 		case !asked:
-			primer.text(gtx, "Type the folder of the vault to use; the current one is filled in.", .Small, color = s[.Fg_Color_Muted])
+			primer.text(gtx, "Choose the folder of the vault to use, or type its path.", .Small, color = s[.Fg_Color_Muted])
 		case plan == nil:
 			primer.text(gtx, "Checking…", .Small, color = s[.Fg_Color_Muted])
 		case !plan.ok:
@@ -769,6 +828,7 @@ move_dialog :: proc(gtx: ^ui.Ctx, m: ^Model, current: string) {
 page_vault :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	s := &m.scheme
 	v, st := ui.need(gtx, shapes.Vault{}, shapes.Vault_Result)
+	vault_picked(gtx, m)
 	defer move_dialog(gtx, m, ready(st) ? v.vault : "")
 	arrange(gtx, m)
 	w := split(gtx, m, 0.5, 0.5)
@@ -784,7 +844,19 @@ page_vault :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		if v.commit != "" {
 			version = fmt.tprintf("%s · %s", v.version, v.commit)
 		}
-		fields(gtx, {{"vault", v.vault}, {"brain", version}, {"checkout", v.tool}})
+		ui.column(gtx, gap = 8, align = .Fill)
+		{
+			ui.column(gtx, gap = 2, align = .Fill, key = 1)
+			primer.text(gtx, "vault", .Small, .Medium, color = m.scheme[.Fg_Color_Muted])
+			// The folder opens in the system's file manager.
+			st := ui.stack_open(gtx, key = 2)
+			if primer.link(gtx, v.vault) {
+				ui.open_url(gtx, file_url(v.vault))
+			}
+			primer.tooltip(gtx, "Open the folder in your file manager.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+			ui.close(&st)
+		}
+		fields(gtx, {{"brain", version}, {"checkout", v.tool}})
 	}
 	pane(gtx, m, .Vault_Travel, w[1], "Sync and review", scroll = false)
 	if !ready(st) {

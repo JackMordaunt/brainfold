@@ -397,4 +397,25 @@ a_bullet_written_runs_the_cli :: proc(t: ^testing.T) {
 	testing.expect_value(t, times_asked(&r.f, strings.concatenate({"--json bullet write ", line, " --to MEMORY"}, context.temp_allocator)), 1)
 	testing.expect(t, shows(&r, "Written orbital period at AI/MEMORY.md:9"), "the toast")
 	testing.expect(t, times_asked(&r.f, "bullet list --json") >= 2, "the list read again")
+	testing.expect_value(t, times_asked(&r.f, "doctor --json"), 0) // no report shown, none made
+}
+
+// A stale bullet's "Still true" runs brain bullet touch, then doctor
+// again, so the bullet leaves the stale list.
+@(test)
+a_stale_bullet_touched_reruns_doctor :: proc(t: ^testing.T) {
+	r: Rig
+	rig_open(&r)
+	defer rig_close(&r)
+	answer(&r.f, "doctor --json", `{"queries_logged":5,"stale":[{"file":"AI/MEMORY.md","handle":"old fact","date":"2025-01-01"}]}`)
+	answer(&r.f, "--json bullet touch old fact", `{"status":"touched","handle":"old fact","file":"AI/MEMORY.md","line":3,"errors":[],"warnings":[]}`)
+	r.m.page = .Doctor
+	testing.expect(t, settle(&r))
+	answer(&r.f, "doctor --json", `{"queries_logged":5,"stale":[]}`)
+	testing.expect(t, ui.probe_click(&r.p, "Still true"))
+	testing.expect(t, settle(&r))
+	testing.expect_value(t, times_asked(&r.f, "--json bullet touch old fact"), 1)
+	testing.expect_value(t, times_asked(&r.f, "doctor --json"), 2)
+	testing.expect(t, shows(&r, "Dated today: old fact at AI/MEMORY.md:3"), "the toast")
+	testing.expect(t, shows(&r, "No stale"), "the list, from the fresh report")
 }

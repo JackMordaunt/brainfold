@@ -84,9 +84,9 @@ page_activity :: proc(gtx: ^ui.Ctx, m: ^Model) {
 				// long query does not squeeze them into a column of their own.
 				if primer.action_list_item(&l, r.query, description = fmt.tprintf("%s · %s", r.caller, clock(r.ts)), description_variant = .Block, leading = r.hits == 0 ? .Alert : .Search, trailing_text = hits) {
 					// A lookup leads to what was said about it.
+					go(m, .Recall)
 					ui.text_set(&m.search, r.query)
 					m.turn.len = 0
-					m.page = .Recall
 				}
 			}
 			primer.action_list_close(&l)
@@ -100,9 +100,7 @@ page_activity :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		for b in ledger.top_bullets {
 			if primer.action_list_item(&l, b.handle, description = fmt.tprintf("%s · %d sessions", b.file, b.sessions), description_variant = .Block, leading = .Book, trailing_text = fmt.tprintf("%d×", b.served)) {
 				// A bullet leads to itself, to read or correct.
-				choose(&m.bullet, b.handle)
-				m.editor.drafting = false
-				m.page = .Bullets
+				open_bullet(m, b.handle)
 			}
 		}
 		primer.action_list_close(&l)
@@ -281,9 +279,9 @@ miss_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		draft(m, query, query)
 	}
 	if primer.button(gtx, "Open in Recall", .Default, .Small, leading = .Comment_Discussion) {
+		go(m, .Recall)
 		ui.text_set(&m.search, query)
 		m.turn.len = 0
-		m.page = .Recall
 	}
 }
 
@@ -312,9 +310,9 @@ miss_detail :: proc(gtx: ^ui.Ctx, m: ^Model, query: string) {
 	l := primer.action_list_open(gtx, .Full, dividers = true, heading = "Said about it", heading_level = 3)
 	for t in res.turns {
 		if primer.action_list_item(&l, t.title, description = t.snippet, description_variant = .Block, leading = .Comment_Discussion, trailing_text = t.agent) {
+			go(m, .Recall)
 			ui.text_set(&m.search, query)
 			choose(&m.turn, t.id)
-			m.page = .Recall
 		}
 	}
 	primer.action_list_close(&l)
@@ -351,7 +349,10 @@ page_recall :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	for t in turns {
 		found ||= t.id == current
 	}
-	if !found && len(turns) > 0 {
+	// A turn opened from elsewhere (a bullet's provenance) stays shown
+	// while the search it was opened under does, found by it or not.
+	pinned := current != "" && terms != "" && chosen(&m.pin) == terms
+	if !found && !pinned && len(turns) > 0 {
 		choose(&m.turn, turns[0].id)
 		current = chosen(&m.turn)
 	}
@@ -370,7 +371,9 @@ page_recall :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			for t in turns {
 				if primer.action_list_item(&l, t.title, description = fmt.tprintf("%s · %s · %s", t.agent, t.date, t.snippet), description_variant = .Block, leading = .Comment_Discussion, active = t.id == current) {
 					choose(&m.turn, t.id)
+					m.pin.len = 0
 					m.panes[.Around] = {}
+					m.reveal = true
 				}
 			}
 			primer.action_list_close(&l)
@@ -378,7 +381,7 @@ page_recall :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	}
 	{
 		pane(gtx, m, .Around, w[1])
-		if current == "" || len(turns) == 0 {
+		if current == "" || (len(turns) == 0 && !pinned) {
 			empty(gtx, "The conversation shows here", "Choose a turn to read it in the exchange that produced it.", .Comment_Discussion)
 			return
 		}
@@ -410,6 +413,11 @@ around :: proc(gtx: ^ui.Ctx, m: ^Model, id: string) {
 		edge := t.hit ? s[.Border_Color_Accent_Emphasis] : s[.Border_Color_Muted]
 		b := ui.box_open(gtx, {fill = fill, outline = edge, stroke = 1, radius = 6, padding = ui.pad_all(12)})
 		defer ui.close(&b)
+		// The turn opened is brought into view once, its top first.
+		if t.hit && m.reveal {
+			ui.scroll_into_view(gtx, {0, 0, 1, 240})
+			m.reveal = false
+		}
 		ui.column(gtx, gap = 6, align = .Fill)
 		{
 			ui.row(gtx, gap = 8, align = .Center)

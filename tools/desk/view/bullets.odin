@@ -59,7 +59,7 @@ editor_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		return
 	}
 	if primer.button(gtx, "Save", .Primary, leading = .Check, loading = waiting_on(m, .Replace_Bullet), inactive = !f.ok) && f.ok {
-		send(gtx, m, .Replace_Bullet, {f.handle, strings.trim_space(ui.text_string(&e.handle))}, f.line)
+		send(gtx, m, .Replace_Bullet, {f.handle, strings.trim_space(ui.text_string(&e.handle))}, f.line, place(f.current))
 	}
 	if primer.button(gtx, "Revert", .Default, inactive = !f.dirty || f.busy) && f.dirty && !f.busy {
 		load(e, f.current)
@@ -94,19 +94,28 @@ load :: proc(e: ^Editor, b: shapes.Bullet) {
 }
 
 // draft starts a new bullet, named for what it answers when it answers a
-// miss, dated today.
-draft :: proc(m: ^Model, handle := "", evidence := "") {
+// miss, dated today; source, when set, is where it came from.
+draft :: proc(m: ^Model, handle := "", evidence := "", source := "") {
+	go(m, .Bullets)
 	e := &m.editor
 	ui.text_set(&e.handle, handle)
 	ui.text_set(&e.aliases, "")
 	ui.text_set(&e.fact, "")
-	ui.text_set(&e.source, "")
+	ui.text_set(&e.source, source)
 	ui.text_set(&e.date, today())
 	e.loaded.len = 0
 	e.drafting = true
 	choose(&e.evidence, evidence)
-	m.page = .Bullets
 	m.panes[.Bullet] = {}
+}
+
+// place is where b is, FILE:LINE, which names it where two bullets share
+// its handle; "" for no bullet.
+place :: proc(b: shapes.Bullet) -> string {
+	if b.file == "" {
+		return ""
+	}
+	return fmt.tprintf("%s:%d", b.file, b.line)
 }
 
 // today is the date as a bullet carries it, YYYY-MM-DD.
@@ -282,9 +291,17 @@ page_bullets :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		ui.list(gtx, &m.bullet_list, len(shown), bullet_row, rows)
 	}
 	editing := e.drafting || current != nil
-	pane(gtx, m, .Bullet, w[1], footer = editing ? editor_actions : nil)
+	// A bullet that exists has a provenance as well as fields; a draft has
+	// only fields.
+	tabs := !e.drafting && current != nil
+	story := tabs && m.bullet_tab == 1
+	pane(gtx, m, .Bullet, w[1], bar = tabs ? bullet_tabs : nil, scroll = !story, footer = editing && !story ? editor_actions : nil)
 	if !editing {
 		empty(gtx, "Nothing chosen", "Choose a bullet to read and edit it, or write a new one.", .Book)
+		return
+	}
+	if story {
+		provenance(gtx, m, current^)
 		return
 	}
 	editor(gtx, m, list, current)
@@ -485,6 +502,6 @@ drop_confirm :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	}
 	handle := chosen(&e.loaded)
 	if primer.confirmation_dialog(gtx, &e.dropping, fmt.tprintf("Drop %s?", handle), "It leaves the vault and no find returns it again. It is kept in AI/DROPPED.md, so it is not lost.", confirm_content = "Drop", confirm_type = .Danger) == .Confirm {
-		send(gtx, m, .Drop_Bullet, {handle})
+		send(gtx, m, .Drop_Bullet, {handle}, place(e.frame.current))
 	}
 }

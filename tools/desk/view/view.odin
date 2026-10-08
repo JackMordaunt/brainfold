@@ -19,6 +19,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:math"
 import "core:mem"
+import "core:strconv"
 import "core:strings"
 
 import "jm:ui"
@@ -50,6 +51,7 @@ LOADING_DELAY :: 0.15 // seconds before a wait is shown, so a quick answer never
 
 Page :: enum u8 {
 	Activity,
+	Savings,
 	Misses,
 	Recall,
 	Inbox,
@@ -60,6 +62,7 @@ Page :: enum u8 {
 
 PAGE_TITLES := [Page]string {
 	.Activity = "Activity",
+	.Savings  = "Savings",
 	.Misses   = "Misses",
 	.Recall   = "Recall",
 	.Inbox    = "Inbox",
@@ -68,9 +71,14 @@ PAGE_TITLES := [Page]string {
 	.Vault    = "Vault",
 }
 
+// WATCH_PAGES is how many pages, from the first, the rail groups under
+// Watch; the rest are under Tend.
+WATCH_PAGES :: 4
+
 // PAGE_NOTES is the line under each title that says what the page is for.
 PAGE_NOTES := [Page]string {
 	.Activity = "What your agents asked, and what it cost them.",
+	.Savings  = "What your agents cost, and what the vault saved them.",
 	.Misses   = "Queries that still find nothing. Each is a bullet or an alias away.",
 	.Recall   = "What was said, across every agent's transcripts.",
 	.Inbox    = "Facts your agents proposed. Approve to keep, drop to forget.",
@@ -81,6 +89,7 @@ PAGE_NOTES := [Page]string {
 
 PAGE_ICONS := [Page]primer.Icon {
 	.Activity = .Pulse,
+	.Savings  = .Fiscal_Host,
 	.Misses   = .Question,
 	.Recall   = .Comment_Discussion,
 	.Inbox    = .Inbox,
@@ -108,6 +117,11 @@ Pane_Id :: enum u8 {
 	Bullet,
 	Chart_Lookups,
 	Chart_Saved,
+	Chart_Spend,
+	Chart_Finds,
+	Spend_Models,
+	Spend_Agents,
+	Provenance, // its scrolling part; not a pane of its own
 }
 
 // Pending is a command sent and not yet answered: its id, which Outcome
@@ -131,6 +145,10 @@ Pending_Kind :: enum u8 {
 	Write_Bullet,
 	Replace_Bullet,
 	Drop_Bullet,
+	Touch_Bullet,
+	Unlink,
+	Set_Price,
+	Import,
 	Set_Vault,
 }
 
@@ -163,7 +181,6 @@ Model :: struct {
 	bullet_list: ui.List_State, // the bullets list's scroll; ui.list lays out only the rows in view
 	haystacks: Haystacks, // the bullets' text as the search reads it
 	moving:    bool, // the change-vault dialog is open
-	focus_path: bool, // its path field takes the focus on the next frame
 	vault_path: ui.Text_State, // the path it would move to
 	shown:     Chosen, // the last terms Recall had an answer for, drawn while newer ones load
 	turn:      Chosen, // the turn Recall shows the conversation around
@@ -183,6 +200,19 @@ Model :: struct {
 	nav_width: f32, // the rail's dragged width; 0 is NAV_WIDTH
 	collapsed: bool, // the person collapsed the rail
 	dragging:  bool, // the rail's edge is being dragged
+	history:   History, // the pages jumped from, for Ctrl+O and Ctrl+I
+	fix:       Fix, // the finding Doctor shows, and the fix it is asked to confirm
+	rename:    ui.Text_State, // a duplicate's new handle
+	bullet_tab: int, // the bullet shown: 0 edited, 1 its provenance
+	pin:       Chosen, // the Recall search under which m.turn stays shown, found or not
+	reveal:    bool, // scroll the conversation to its matching turn once it has drawn
+	seen:      [Page]int, // what was waiting on each page when it was last open: its dot shows only more
+	spend_window: int, // Savings' days: an index into SPEND_WINDOWS
+	spend_gen: int, // bumped when a price is set, so spend is read again
+	pricing:   Chosen, // the model Savings is setting a price for
+	price_in:  ui.Text_State, // its dollars per million input tokens
+	price_out: ui.Text_State, // and output tokens
+	import_pick: Import_Pick, // the import dialog
 	allocator: mem.Allocator,
 }
 
@@ -194,16 +224,30 @@ model_init :: proc(m: ^Model, allocator := context.allocator) {
 	m.alias.buf = make([dynamic]u8, allocator)
 	m.filter.buf = make([dynamic]u8, allocator)
 	m.vault_path.buf = make([dynamic]u8, allocator)
+	m.rename.buf = make([dynamic]u8, allocator)
+	m.price_in.buf = make([dynamic]u8, allocator)
+	m.price_out.buf = make([dynamic]u8, allocator)
+	m.import_pick.ticked = make([dynamic]string, allocator)
+	m.spend_window = 1
 	editor_init(&m.editor, allocator)
 	m.selected = make([dynamic]string, allocator)
+	m.history.places = make([dynamic]Place, allocator)
 }
 
 model_destroy :: proc(m: ^Model) {
 	primer.toasts_destroy(&m.toasts)
+	delete(m.history.places)
 	delete(m.search.buf)
 	delete(m.alias.buf)
 	delete(m.filter.buf)
 	delete(m.vault_path.buf)
+	delete(m.rename.buf)
+	delete(m.price_in.buf)
+	delete(m.price_out.buf)
+	for p in m.import_pick.ticked {
+		delete(p, m.allocator)
+	}
+	delete(m.import_pick.ticked)
 	editor_destroy(&m.editor)
 	for x in m.haystacks.text {
 		delete(x, m.allocator)
@@ -227,12 +271,13 @@ Session :: struct {
 	theme:    primer.Theme,
 	panes:    [Pane_Id]ui.Scroll_Offset,
 	findings: Finding_List,
+	seen:     [Page]int,
 }
 
 view :: proc(gtx: ^ui.Ctx, user: rawptr) {
 	m := (^Model)(user)
-	if s := (Session{m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings}); ui.restore_struct(gtx, &s, gtx.allocator) {
-		m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings = s.page, s.nav_width, s.collapsed, s.theme, s.panes, s.findings
+	if s := (Session{m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings, m.seen}); ui.restore_struct(gtx, &s, gtx.allocator) {
+		m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings, m.seen = s.page, s.nav_width, s.collapsed, s.theme, s.panes, s.findings, s.seen
 	}
 	m.scheme = primer.theme_scheme(m.theme)
 	primer.use(&m.scheme, m.theme)
@@ -240,6 +285,7 @@ view :: proc(gtx: ^ui.Ctx, user: rawptr) {
 	s := &m.scheme
 	m.window = gtx.constraints.max
 	ops.fill(gtx.scene, ops.Rect{0, 0, m.window.x, m.window.y}, s[.Bg_Color_Inset])
+	history_keys(gtx, m)
 
 	{
 		ui.row(gtx, align = .Fill)
@@ -268,12 +314,14 @@ view :: proc(gtx: ^ui.Ctx, user: rawptr) {
 			page_doctor(gtx, m)
 		case .Vault:
 			page_vault(gtx, m)
+		case .Savings:
+			page_savings(gtx, m)
 		}
 	}
 	// After the pages, so a command sent this frame needs its outcome now.
 	settle_outcomes(gtx, m)
 	primer.toaster(gtx, &m.toasts)
-	ui.persist_struct(gtx, Session{m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings})
+	ui.persist_struct(gtx, Session{m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings, m.seen})
 }
 
 // rail_collapsed is whether the rail shows only its icons: the person
@@ -369,14 +417,27 @@ nav :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	ops.fill(gtx.scene, ops.Rect{0, 0, w, h}, s[.Bg_Color_Inset])
 	ops.fill(gtx.scene, ops.Rect{w - 1, 0, 1, h}, s[.Border_Color_Default])
 	counts: [Page]string
-	if log, st := ui.need(gtx, shapes.Log{}, shapes.Log_Result); ready(st) && len(log.backlog) > 0 {
-		counts[.Misses] = fmt.tprint(len(log.backlog))
+	waiting: [Page]int
+	if log, st := ui.need(gtx, shapes.Log{}, shapes.Log_Result); ready(st) {
+		waiting[.Misses] = len(log.backlog)
 	}
-	if inbox, st := ui.need(gtx, shapes.Inbox{}, shapes.Inbox_Result); ready(st) && len(inbox.proposals) > 0 {
-		counts[.Inbox] = fmt.tprint(len(inbox.proposals))
+	if inbox, st := ui.need(gtx, shapes.Inbox{}, shapes.Inbox_Result); ready(st) {
+		waiting[.Inbox] = len(inbox.proposals)
+	}
+	// A page's dot is news: more waiting than when it was last open.
+	// Opening the page clears it; the count beside its name stays.
+	fresh: [Page]bool
+	for p in Page {
+		if waiting[p] > 0 {
+			counts[p] = fmt.tprint(waiting[p])
+		}
+		if p == m.page || waiting[p] < m.seen[p] {
+			m.seen[p] = waiting[p]
+		}
+		fresh[p] = waiting[p] > m.seen[p]
 	}
 	if rail_collapsed(m) {
-		rail(gtx, m, counts)
+		rail(gtx, m, counts, fresh)
 		return
 	}
 	nav_edge(gtx, m, w, h)
@@ -391,8 +452,8 @@ nav :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			m.collapsed = true
 		}
 	}
-	watch := make([]primer.Nav_Item, 3, context.temp_allocator)
-	tend := make([]primer.Nav_Item, len(Page) - 3, context.temp_allocator)
+	watch := make([]primer.Nav_Item, WATCH_PAGES, context.temp_allocator)
+	tend := make([]primer.Nav_Item, len(Page) - WATCH_PAGES, context.temp_allocator)
 	for p in Page {
 		it := primer.Nav_Item {
 			label         = PAGE_TITLES[p],
@@ -400,17 +461,17 @@ nav :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			trailing_text = counts[p],
 			current       = p == m.page,
 		}
-		if int(p) < 3 {
+		if int(p) < WATCH_PAGES {
 			watch[int(p)] = it
 		} else {
-			tend[int(p) - 3] = it
+			tend[int(p) - WATCH_PAGES] = it
 		}
 	}
 	groups := []primer.Nav_Group{{title = "Watch", items = watch}, {title = "Tend", items = tend}}
 	if it := primer.nav_list(gtx, groups, label = "Pages"); it != nil {
 		for title, p in PAGE_TITLES {
 			if title == it.label {
-				m.page = p
+				go(m, p)
 			}
 		}
 	}
@@ -419,7 +480,7 @@ nav :: proc(gtx: ^ui.Ctx, m: ^Model) {
 // rail is the collapsed rail: the mark, then a button per page with its
 // name as a tooltip and a dot when something waits on it. Expanding it is
 // offered only when the person collapsed it; a narrow window keeps it so.
-rail :: proc(gtx: ^ui.Ctx, m: ^Model, counts: [Page]string) {
+rail :: proc(gtx: ^ui.Ctx, m: ^Model, counts: [Page]string, fresh: [Page]bool) {
 	s := &m.scheme
 	ui.column(gtx, gap = 6, align = .Center)
 	ui.spacer(gtx, 18)
@@ -427,8 +488,8 @@ rail :: proc(gtx: ^ui.Ctx, m: ^Model, counts: [Page]string) {
 	ui.spacer(gtx, 10)
 	for p in Page {
 		desc := counts[p] != "" ? fmt.tprintf("%s waiting", counts[p]) : ""
-		if icon_action(gtx, PAGE_ICONS[p], PAGE_TITLES[p], p == m.page ? .Default : .Invisible, dot = counts[p] != "" ? .Button : .None, description = desc, direction = .E, key = u64(p) + 1) {
-			m.page = p
+		if icon_action(gtx, PAGE_ICONS[p], PAGE_TITLES[p], p == m.page ? .Default : .Invisible, dot = fresh[p] ? .Button : .None, description = desc, direction = .E, key = u64(p) + 1) {
+			go(m, p)
 		}
 	}
 	if m.collapsed && m.window.x - open_width(m) - 2 * gutter(m) >= RAIL_BODY {
@@ -481,6 +542,10 @@ header :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			controls = 160
 		case .Bullets:
 			controls = 150
+		case .Savings:
+			controls = 140
+		case .Inbox:
+			controls = 190
 		}
 		w := body_width(m) - 120 - controls
 		ui.sized(gtx, {min = {w, 0}, max = {w, ui.INF}})
@@ -499,6 +564,12 @@ header :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	case .Bullets:
 		ui.row(gtx, gap = 12, align = .Center)
 		bullets_control(gtx, m)
+	case .Savings:
+		ui.row(gtx, gap = 12, align = .Center)
+		savings_control(gtx, m)
+	case .Inbox:
+		ui.row(gtx, gap = 12, align = .Center)
+		inbox_control(gtx, m)
 	}
 	// An icon button's tooltip is its name and description.
 	syncing := waiting_on(m, .Sync)
@@ -720,9 +791,18 @@ send :: proc(gtx: ^ui.Ctx, m: ^Model, kind: Pending_Kind, handles: []string = ni
 	case .Write_Bullet:
 		ui.command(gtx, shapes.Command(shapes.Write_Bullet{id = id, line = arg, to = arg2}))
 	case .Replace_Bullet:
-		ui.command(gtx, shapes.Command(shapes.Replace_Bullet{id = id, handle = handles[0], line = arg}))
+		ui.command(gtx, shapes.Command(shapes.Replace_Bullet{id = id, handle = handles[0], line = arg, at = arg2}))
 	case .Drop_Bullet:
-		ui.command(gtx, shapes.Command(shapes.Drop_Bullet{id = id, handle = handles[0]}))
+		ui.command(gtx, shapes.Command(shapes.Drop_Bullet{id = id, handle = handles[0], at = arg}))
+	case .Touch_Bullet:
+		ui.command(gtx, shapes.Command(shapes.Touch_Bullet{id = id, handle = handles[0], at = arg}))
+	case .Import:
+		ui.command(gtx, shapes.Command(shapes.Import{id = id, paths = handles}))
+	case .Set_Price:
+		ui.command(gtx, shapes.Command(shapes.Set_Price{id = id, prefix = handles[0], input = arg, output = arg2}))
+	case .Unlink:
+		line, _ := strconv.parse_int(arg2)
+		ui.command(gtx, shapes.Command(shapes.Unlink{id = id, file = arg, line = line, target = handles[0]}))
 	case .Set_Vault:
 		ui.command(gtx, shapes.Command(shapes.Set_Vault{id = id, path = arg}))
 	}
@@ -762,6 +842,11 @@ settle_outcomes :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			case .Drop_Bullet:
 				m.bullet.len = 0
 				m.editor.loaded.len = 0
+			case .Set_Price:
+				m.spend_gen += 1
+				m.pricing.len = 0
+			case .Import:
+				m.import_pick.gen += 1
 			}
 		}
 		free_handles(p.handles, m.allocator)
