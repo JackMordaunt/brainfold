@@ -256,17 +256,17 @@ canonical_vault :: proc(cli: ^Cli) -> string {
 // given, BRAIN_VAULT, the vault an earlier install recorded, and the
 // canonical path. Nothing is searched for. created is true when the
 // canonical path does not exist yet and install has to make it.
-install_vault :: proc(cli: ^Cli, given: string) -> (vault: string, created: bool, err: string) {
+install_vault :: proc(cli: ^Cli, given: string, fresh := false) -> (vault: string, created: bool, err: string) {
 	named := given
 	if named == "" {
 		named = getenv(cli, "BRAIN_VAULT")
 	}
 	if named != "" {
-		if !os.is_dir(named) {
+		if !os.is_dir(named) && !(fresh && cli.dry) {
 			return "", false, fmt.aprintf("install: no such directory: %s", named)
 		}
 		abs, aerr := path.abs(named)
-		return aerr == nil ? abs : clean(named), false, ""
+		return aerr == nil ? abs : clean(named), fresh, ""
 	}
 	if v := recorded_path(cli.conf_vault); v != "" && os.is_dir(v) {
 		return clean(v), false, ""
@@ -303,10 +303,13 @@ create_vault :: proc(cli: ^Cli, vault: string) -> string {
 cmd_install :: proc(cli: ^Cli, args: []string) -> int {
 	cli.dry = false
 	given := ""
+	fresh := false
 	for arg in args {
 		switch {
 		case arg == "--dry-run":
 			cli.dry = true
+		case arg == "--new":
+			fresh = true
 		case strings.has_prefix(arg, "-"):
 			return fail(cli, fmt.aprintf("install: unknown flag %s", arg))
 		case arg == "":
@@ -314,7 +317,19 @@ cmd_install :: proc(cli: ^Cli, args: []string) -> int {
 			given = arg
 		}
 	}
-	vault, created, verr := install_vault(cli, given)
+	// --new <dir>: a starter vault in a folder a person chose, made when it
+	// is not there yet; never over one that holds anything.
+	if fresh {
+		if given == "" {
+			return fail(cli, "install: --new needs the folder for the new vault")
+		}
+		if !cli.dry {
+			if err := prepare_vault_dir(given); err != "" {
+				return fail(cli, err)
+			}
+		}
+	}
+	vault, created, verr := install_vault(cli, given, fresh)
 	if verr != "" {
 		return fail(cli, verr)
 	}

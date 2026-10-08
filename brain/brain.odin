@@ -263,6 +263,8 @@ run :: proc(cli: ^Cli, raw_args: []string) -> int {
 		return cmd_unlink(cli, rest)
 	case "spend":
 		return cmd_spend(cli, rest)
+	case "setup":
+		return cmd_setup(cli, rest)
 	case "lint":
 		return cmd_lint(cli, rest)
 	case "secrets":
@@ -359,7 +361,9 @@ Keep it healthy
   brain secrets [--staged]   scan for credentials; --history, every commit
   brain reindex              rebuild the index from the markdown (automatic; rarely needed)
 Set up
-  brain install [<vault>]    bind this machine to a vault; --dry-run shows the plan
+  brain install [<vault>]    bind this machine to a vault; --new makes one in an empty folder,
+                             --dry-run shows the plan
+  brain setup                how far this machine is from a working vault, step by step (--json)
   brain uninstall            undo those bindings; the vault is untouched
   brain locate [--tool]      the vault's path; --tool, this CLI's checkout
   brain hooks [on|off]       pack, prime and settle in every harness here: Claude Code, pi;
