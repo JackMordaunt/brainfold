@@ -11,14 +11,14 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
-import "jm:ui/sdl"
+import "jm:ui/shell"
 
 main :: proc() {
 	if len(os.args) < 2 || len(os.args) > 4 {
 		fmt.eprintln("usage: host <pointer-file | child exe> [title] [WxH]")
 		os.exit(2)
 	}
-	app := sdl.Host_App {
+	app := shell.Host_App {
 		title  = "brainfold",
 		width  = 1440,
 		height = 960,
@@ -40,7 +40,7 @@ main :: proc() {
 	if strings.has_suffix(os.args[1], ".watch") {
 		app.watch = os.args[1]
 	} else {
-		app.child = {os.args[1]}
+		app.child = os.args[1:2]
 	}
-	sdl.run_host(app)
+	shell.run_host(app)
 }
