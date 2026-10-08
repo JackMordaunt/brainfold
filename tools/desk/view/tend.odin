@@ -60,6 +60,7 @@ page_inbox :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	// Drawn last, over the panes.
 	defer bulk_confirm(gtx, m)
 	defer import_dialog(gtx, m)
+	defer merge_dialog(gtx, m)
 	arrange(gtx, m)
 	w := split_list(gtx, m)
 	if !ready(st) {
@@ -162,9 +163,10 @@ proposal :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal) {
 	if p.line != "" {
 		primer.text(gtx, "As it will be written", .Small, .Medium, color = s[.Fg_Color_Muted], key = 5)
 		b := boxed(gtx, 12, key = 6)
-		defer ui.close(&b)
 		primer.text(gtx, p.line, .Small, key = 7)
+		ui.close(&b)
 	}
+	proposal_review(gtx, m, p)
 }
 
 has_handle :: proc(ps: []shapes.Proposal, handle: string) -> bool {

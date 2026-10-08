@@ -92,6 +92,13 @@ answer :: proc(p: ^ui.Probe, m: ^Model) {
 		answered = 1147,
 		finds = {hits = 155, misses = 17, hit_cost = 0.2, miss_cost = 0.36, saved = 24.75, enough = true},
 	})
+	ui.probe_deliver(p, shapes.Inbox_Review{handle = "jm:ui menu steals focus back"}, shapes.Inbox_Review_Result {
+		handle   = "jm:ui menu steals focus back",
+		similar  = {{file = "AI/MEMORY.md", line = 8, handle = "jm:ui menu steals focus back", fact = LONG, date = "2026-09-01", share = 0.9, same_handle = true}, {file = "AI/LEARNINGS.md", line = 3, handle = "a much longer handle that names the same focus fact in other words", fact = LONG, date = "2026-09-02", share = 0.55}},
+		errors   = {"it says nothing: the fact is empty"},
+		warnings = {"the fact is 430 characters (cap 400); say one fact, and spill the rest to a note"},
+		origin   = {ts = "2026-10-08T10:00:00Z", agent = "claude", session = "s1", title = LONG, turn = "t1"},
+	})
 	ui.probe_deliver(p, shapes.Recall{terms = "harfbuzz shaping cluster", limit = 10}, shapes.Recall_Result{turns = {{id = "x1", date = "2026-09-25", agent = "claude", title = "Text shaping", snippet = LONG}}})
 }
 

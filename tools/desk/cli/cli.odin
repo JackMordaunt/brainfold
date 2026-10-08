@@ -49,6 +49,7 @@ Query :: union {
 	shapes.Bullet_Show,
 	shapes.Spend,
 	shapes.Import_Sources,
+	shapes.Inbox_Review,
 	shapes.Install_Plan,
 	shapes.Vault,
 }
@@ -120,6 +121,17 @@ read :: proc(c: ^Client, q: Query, allocator := context.allocator) -> []byte {
 		return marshal(r, allocator)
 	case shapes.Bullet_Check:
 		return marshal(check(c, q.line), allocator)
+	case shapes.Inbox_Review:
+		r: shapes.Inbox_Review_Result
+		if q.handle != "" {
+			n, err := place_of(c, q.handle)
+			if err == "" {
+				r.error = call(c, {"--json", "inbox", "review", fmt.aprint(n)}, &r)
+			} else {
+				r.error = err
+			}
+		}
+		return marshal(r, allocator)
 	case shapes.Import_Sources:
 		r: shapes.Import_Sources_Result
 		r.error = call(c, {"--json", "import", "--list"}, &r)
@@ -340,6 +352,12 @@ act :: proc(c: ^Client, cmd: shapes.Command, allocator := context.allocator) -> 
 		return edit(c, at_args({"--json", "bullet", "touch", v.handle}, v.at), "Dated today:")
 	case shapes.Import:
 		return import_sources(c, v.paths)
+	case shapes.Merge:
+		n, err := place_of(c, v.proposal)
+		if err != "" {
+			return {done = true, message = err}
+		}
+		return edit(c, at_args({"--json", "inbox", "merge", fmt.aprint(n), "--into", v.into, v.line}, v.at), "Merged into")
 	case shapes.Set_Price:
 		return step(c, {"spend", "--price", v.prefix, v.input, v.output}, fmt.aprintf("%s priced at $%s in, $%s out a million tokens", v.prefix, v.input, v.output))
 	case shapes.Unlink:

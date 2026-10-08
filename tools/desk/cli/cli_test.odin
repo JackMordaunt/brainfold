@@ -212,3 +212,25 @@ an_import_takes_each_source_and_counts_what_it_proposed :: proc(t: ^testing.T) {
 	o = act(&client, shapes.Import{id = 3, paths = {"/missing"}}, context.temp_allocator)
 	testing.expect(t, !o.ok)
 }
+
+// A proposal is reviewed and merged by its place in the inbox now, found
+// by its handle.
+@(test)
+a_proposal_is_reviewed_and_merged_by_its_place :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["inbox --json"] = `{"proposals":[{"n":1,"handle":"other"},{"n":2,"handle":"twin"}]}`
+	c.answers["--json inbox review 2"] = `{"n":2,"handle":"twin","similar":[{"file":"AI/MEMORY.md","line":4,"handle":"Twin","fact":"f","share":0.8,"same_handle":true}],"errors":[],"warnings":["it has no aliases"],"origin":null}`
+	r := decode(t, read(&client, shapes.Inbox_Review{handle = "twin"}, context.temp_allocator), shapes.Inbox_Review_Result)
+	testing.expect_value(t, r.error, "")
+	testing.expect_value(t, len(r.similar), 1)
+	testing.expect(t, r.similar[0].same_handle)
+	testing.expect_value(t, r.similar[0].share, 0.8)
+	testing.expect_value(t, r.origin.session, "")
+	line := "- **Twin** — merged — x — 2026-10-08"
+	c.answers[strings.concatenate({"--json inbox merge 2 --into Twin ", line, " --at AI/MEMORY.md:4"}, context.temp_allocator)] = `{"status":"merged","handle":"Twin","file":"AI/MEMORY.md","line":4,"errors":[],"warnings":[]}`
+	o := act(&client, shapes.Merge{id = 1, proposal = "twin", into = "Twin", at = "AI/MEMORY.md:4", line = line}, context.temp_allocator)
+	testing.expect(t, o.ok, o.message)
+	testing.expect_value(t, o.message, "Merged into Twin at AI/MEMORY.md:4")
+}
+

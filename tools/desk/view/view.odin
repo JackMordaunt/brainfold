@@ -149,6 +149,7 @@ Pending_Kind :: enum u8 {
 	Unlink,
 	Set_Price,
 	Import,
+	Merge,
 	Set_Vault,
 }
 
@@ -213,6 +214,7 @@ Model :: struct {
 	price_in:  ui.Text_State, // its dollars per million input tokens
 	price_out: ui.Text_State, // and output tokens
 	import_pick: Import_Pick, // the import dialog
+	merge:     Merge_Edit, // the dialog folding a proposal into a bullet
 	allocator: mem.Allocator,
 }
 
@@ -228,6 +230,7 @@ model_init :: proc(m: ^Model, allocator := context.allocator) {
 	m.price_in.buf = make([dynamic]u8, allocator)
 	m.price_out.buf = make([dynamic]u8, allocator)
 	m.import_pick.ticked = make([dynamic]string, allocator)
+	merge_init(&m.merge, allocator)
 	m.spend_window = 1
 	editor_init(&m.editor, allocator)
 	m.selected = make([dynamic]string, allocator)
@@ -248,6 +251,7 @@ model_destroy :: proc(m: ^Model) {
 		delete(p, m.allocator)
 	}
 	delete(m.import_pick.ticked)
+	merge_destroy(&m.merge)
 	editor_destroy(&m.editor)
 	for x in m.haystacks.text {
 		delete(x, m.allocator)
@@ -798,6 +802,8 @@ send :: proc(gtx: ^ui.Ctx, m: ^Model, kind: Pending_Kind, handles: []string = ni
 		ui.command(gtx, shapes.Command(shapes.Touch_Bullet{id = id, handle = handles[0], at = arg}))
 	case .Import:
 		ui.command(gtx, shapes.Command(shapes.Import{id = id, paths = handles}))
+	case .Merge:
+		ui.command(gtx, shapes.Command(shapes.Merge{id = id, proposal = handles[0], into = handles[1], line = arg, at = arg2}))
 	case .Set_Price:
 		ui.command(gtx, shapes.Command(shapes.Set_Price{id = id, prefix = handles[0], input = arg, output = arg2}))
 	case .Unlink:

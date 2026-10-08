@@ -962,3 +962,47 @@ a_dot_clears_once_its_page_is_seen :: proc(t: ^testing.T) {
 	ui.probe_frame(&p)
 	testing.expect_value(t, m.seen[.Inbox], 2) // three waiting, two seen: a dot
 }
+
+// A proposal shows what it may repeat; merging into one opens the bullet
+// with the proposal's names added, and sends the edited line.
+@(test)
+a_proposal_is_merged_into_the_bullet_it_repeats :: proc(t: ^testing.T) {
+	m: Model
+	p: ui.Probe
+	open(&p, &m, .Inbox)
+	defer close(&p, &m)
+	ui.probe_deliver(&p, shapes.Inbox{}, shapes.Inbox_Result{proposals = {{n = 1, handle = "Twin", aliases = "pair, double", fact = "said again, with more", date = "2026-10-08"}}})
+	ui.probe_frame(&p)
+	q := shapes.Inbox_Review{handle = "Twin"}
+	testing.expect(t, ui.probe_needs_q(&p, q), "the review is asked for")
+	ui.probe_deliver(&p, q, shapes.Inbox_Review_Result {
+		handle   = "Twin",
+		similar  = {{file = "AI/MEMORY.md", line = 4, handle = "twin", aliases = "double", fact = "said once", source = "here", date = "2026-01-01", share = 0.8, same_handle = true}},
+		warnings = {"it has no aliases"},
+		origin   = {ts = "2026-10-08T10:00:00Z", agent = "claude", session = "s1", title = "Where it was said", turn = "t1"},
+	})
+	ui.probe_frame(&p)
+	testing.expect(t, ui.probe_tagged(&p, "same handle"))
+	testing.expect(t, ui.probe_tagged(&p, "80% shared"))
+	testing.expect(t, ui.probe_tagged(&p, "Where it was said"), "the conversation")
+	testing.expect(t, ui.probe_click(&p, "Merge into this"))
+	ui.probe_advance(&p, 3, 0.1)
+	testing.expect(t, m.merge.open)
+	testing.expect_value(t, ui.text_string(&m.merge.aliases), "double, pair")
+	testing.expect_value(t, ui.text_string(&m.merge.fact), "said once")
+	ui.text_set(&m.merge.fact, "said once, and again with more")
+	ui.probe_frame(&p)
+	line := strings.concatenate({"- **twin** (aliases: double, pair) — said once, and again with more — here — ", today()}, context.temp_allocator)
+	testing.expect(t, ui.probe_needs_q(&p, shapes.Bullet_Check{line = line}), "the line is linted")
+	ui.probe_deliver(&p, shapes.Bullet_Check{line = line}, shapes.Bullet_Check_Result{status = "checked"})
+	ui.probe_advance(&p, 2, 0.1)
+	testing.expect(t, ui.probe_click_top(&p, "Merge"))
+	c, ok := sent(&p, shapes.Merge)
+	testing.expect(t, ok, "a merge")
+	testing.expect_value(t, c.proposal, "Twin")
+	testing.expect_value(t, c.into, "twin")
+	testing.expect_value(t, c.at, "AI/MEMORY.md:4")
+	testing.expect_value(t, c.line, line)
+	testing.expect(t, !m.merge.open)
+}
+

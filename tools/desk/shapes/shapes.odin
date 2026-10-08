@@ -237,6 +237,34 @@ Bullet :: struct {
 	date:    string,
 }
 
+// Inbox_Review is `brain inbox review`: what bears on the proposal named
+// handle before it is approved.
+Inbox_Review :: struct {
+	handle: string,
+}
+
+Inbox_Review_Result :: struct {
+	handle:   string,
+	similar:  []Near_Match, // bullets it may repeat, the closest first
+	errors:   []string, // what lint would refuse it for
+	warnings: []string,
+	origin:   Origin, // empty session when no transcript here holds the proposal
+	error:    string,
+}
+
+// Near_Match is a vault bullet a proposal may repeat.
+Near_Match :: struct {
+	file:        string,
+	line:        int,
+	handle:      string,
+	aliases:     string,
+	fact:        string,
+	source:      string,
+	date:        string,
+	share:       f64, // of the proposal's content words it shares, 0 to 1
+	same_handle: bool,
+}
+
 // Import_Sources is `brain import --list`: every place an agent on this
 // machine keeps memories. gen is asked again after an import.
 Import_Sources :: struct {
@@ -441,6 +469,7 @@ Command :: union {
 	Unlink,
 	Set_Price,
 	Import,
+	Merge,
 	Set_Vault,
 }
 
@@ -541,6 +570,16 @@ Set_Price :: struct {
 	output: string,
 }
 
+// Merge writes line in place of the bullet named into, at at (FILE:LINE),
+// and retires the proposal named proposal, whose fact the line now holds.
+Merge :: struct {
+	id:       u64,
+	proposal: string,
+	into:     string,
+	at:       string,
+	line:     string,
+}
+
 // Import proposes the memories of each source path into the inbox; what
 // the vault already holds is not proposed again.
 Import :: struct {
@@ -592,6 +631,8 @@ command_id :: proc(c: Command) -> u64 {
 	case Set_Price:
 		return v.id
 	case Import:
+		return v.id
+	case Merge:
 		return v.id
 	case Set_Vault:
 		return v.id

@@ -57,6 +57,7 @@ Kind :: enum u8 {
 	Show,
 	Spend,
 	Imports,
+	Review,
 }
 
 // Read is one need to answer: what to ask, under which key. A recall's
@@ -244,6 +245,13 @@ read_of :: proc(need: ui.Need) -> (r: Read, ok: bool) {
 		}
 		r.kind = .Check
 		r.terms_len = copy(r.terms[:], q.line)
+	case ui.need_is(need, shapes.Inbox_Review):
+		q, qok := ui.need_as(need, shapes.Inbox_Review)
+		if !qok {
+			return {}, false
+		}
+		r.kind = .Review
+		r.terms_len = copy(r.terms[:], q.handle)
 	case ui.need_is(need, shapes.Import_Sources):
 		r.kind = .Imports
 	case ui.need_is(need, shapes.Spend):
@@ -321,6 +329,8 @@ clone_command :: proc(c: shapes.Command, allocator: mem.Allocator) -> shapes.Com
 		return shapes.Touch_Bullet{v.id, strings.clone(v.handle, allocator), strings.clone(v.at, allocator)}
 	case shapes.Import:
 		return shapes.Import{v.id, clone_strings(v.paths, allocator)}
+	case shapes.Merge:
+		return shapes.Merge{v.id, strings.clone(v.proposal, allocator), strings.clone(v.into, allocator), strings.clone(v.at, allocator), strings.clone(v.line, allocator)}
 	case shapes.Set_Price:
 		return shapes.Set_Price{v.id, strings.clone(v.prefix, allocator), strings.clone(v.input, allocator), strings.clone(v.output, allocator)}
 	case shapes.Unlink:
@@ -381,6 +391,11 @@ free_command :: proc(c: shapes.Command, allocator: mem.Allocator) {
 		delete(v.at, allocator)
 	case shapes.Import:
 		free_strings(v.paths, allocator)
+	case shapes.Merge:
+		delete(v.proposal, allocator)
+		delete(v.into, allocator)
+		delete(v.at, allocator)
+		delete(v.line, allocator)
 	case shapes.Set_Price:
 		delete(v.prefix, allocator)
 		delete(v.input, allocator)
@@ -429,7 +444,7 @@ refresh :: proc(h: ^Host, _: Refresh) -> []Read {
 	clear(&h.reads)
 	sync.mutex_lock(&h.mutex)
 	for _, r in h.live {
-		if r.kind != .Recall && r.kind != .Around && r.kind != .Doctor && r.kind != .Check && r.kind != .Plan && r.kind != .Spend && r.kind != .Imports {
+		if r.kind != .Recall && r.kind != .Around && r.kind != .Doctor && r.kind != .Check && r.kind != .Plan && r.kind != .Spend && r.kind != .Imports && r.kind != .Review {
 			append(&h.reads, r)
 			h.pending += 1
 		}
@@ -470,6 +485,9 @@ read_one :: proc(h: ^Host, r: Read) -> Read_Done {
 		q = shapes.Spend{days = r.limit}
 	case .Imports:
 		q = shapes.Import_Sources{}
+	case .Review:
+		handle := r.terms
+		q = shapes.Inbox_Review{handle = string(handle[:r.terms_len])}
 	case .Show:
 		both := r.terms
 		at, _, handle := strings.partition(string(both[:r.terms_len]), "\x1f")
@@ -525,7 +543,7 @@ act_one :: proc(h: ^Host, a: Act) -> Act_Done {
 	// made again, so the page shows the vault as the edit left it and
 	// a fixed finding leaves its list.
 	#partial switch _ in a.cmd {
-	case shapes.Approve, shapes.Drop, shapes.Add_Alias, shapes.Remove_Alias, shapes.Write_Bullet, shapes.Replace_Bullet, shapes.Drop_Bullet, shapes.Touch_Bullet, shapes.Unlink:
+	case shapes.Approve, shapes.Drop, shapes.Merge, shapes.Add_Alias, shapes.Remove_Alias, shapes.Write_Bullet, shapes.Replace_Bullet, shapes.Drop_Bullet, shapes.Touch_Bullet, shapes.Unlink:
 		if o.ok && doctor_shown(h) {
 			d := run_doctor(h, a, mem.dynamic_arena_allocator(&arena))
 			delete(d.outcome.message, h.allocator)
