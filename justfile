@@ -8,7 +8,7 @@
 #   just check     type-check for linux, darwin and windows, debug and release
 #   just install   bind this machine to a vault
 #   just logo      open the logo lab, hot-reloading tools/logo as it is edited
-#   just desk      open the desk prototype, hot-reloading tools/desk
+#   just desk      open the desk, hot-reloading tools/desk; desk-png, desk-test
 #   just hot DIR TITLE  the loop under both: any jm:ui child in a window
 #   just branding  regenerate branding/ (SVG from tools/logo, PNG via rsvg-convert)
 #   just proof     what a lookup costs a real agent session: vanilla, plain markdown, brain
@@ -142,31 +142,58 @@ test-installer: release
 install VAULT: release
     build/release/brain{{exe}} install {{VAULT}}
 
-# Hot reload for the windowed tools: tools/host owns the window and DIR is
-# the jm:ui child that draws into it. The child is rebuilt here every time
-# one of its .odin files changes, into its own timestamped binary under
-# build/hot, and named in build/<name>.watch, which the host re-reads and
-# respawns from (ui/sdl.run_host). The loop is a shell one rather than
-# jm's tools/hot-watch because that build omits the C++ runtime Blend2D
-# needs on Linux. GNU stat and date; Linux and macOS with coreutils.
-# Under Hyprland the window opens on the project's workspace, named
-# <parent>/<repo> the way the rest of the desktop is (Personal/brainfold),
-# or on LOGO_WORKSPACE when set; the rule lives for the session only.
+# Hot reload for the windowed tools: HOST owns the window and DIR is the
+# jm:ui child that draws into it. The child is rebuilt here every time one
+# of the .odin files under DIR changes, into its own timestamped binary
+# under build/hot, and named in build/<name>.watch, which the host re-reads
+# and respawns from (ui/shell.run_host). The host is rebuilt and restarted
+# when a file it is built from changes: its own package and every package
+# it reaches by a relative import, test files aside. A host that answers
+# the child's needs (tools/desk/host) shares their shapes with it, and one
+# built from the shapes before an edit misreads the child's after it. The
+# loop is a shell one rather than jm's tools/hot-watch because that build
+# omits the C++ runtime Blend2D needs on Linux. GNU stat and date; Linux
+# and macOS with coreutils. Under Hyprland the window opens on the
+# project's workspace, named <parent>/<repo> the way the rest of the
+# desktop is (Personal/brainfold), or on LOGO_WORKSPACE when set; the rule
+# lives for the session only.
 #
 # Open DIR's child in a hot-reloading window titled TITLE
-hot DIR TITLE SIZE="1440x960": deps
+hot DIR TITLE SIZE="1440x960" HOST="tools/host": deps ui-deps
     #!/usr/bin/env bash
     set -euo pipefail
-    [ -e "{{jm}}"/ui/blend2d/lib/libblend2d.a ] || (cd "{{jm}}" && just blend2d)
     mkdir -p build/debug build/hot
-    {{odin}} build tools/host -debug {{uiflags}} {{cxx_link}} -out:build/debug/host{{exe}}
+    host=build/debug/$(echo "{{HOST}}" | tr / -){{exe}}
     name=$(basename "{{DIR}}")
     pointer=build/$name.watch
-    rm -f "$pointer"
+    restart=build/$name.restart
+    hostpid=build/$name.hostpid
+    rm -f "$pointer" "$restart" "$hostpid"
+    # The host's sources: its package, then each package a non-test file
+    # imports by a relative path, transitively.
+    host_sources() {
+      local todo=("{{HOST}}") seen=" " d f imp
+      while [ ${#todo[@]} -gt 0 ]; do
+        d=$(realpath --relative-to=. "${todo[0]}"); todo=("${todo[@]:1}")
+        case "$seen" in *" $d "*) continue;; esac
+        seen="$seen$d "
+        for f in "$d"/*.odin; do
+          case "$f" in *_test.odin) continue;; esac
+          [ -f "$f" ] || continue
+          echo "$f"
+          for imp in $(sed -n 's/^import[^"]*"\(\.\{1,2\}\/[^"]*\)".*/\1/p' "$f"); do
+            todo+=("$d/$imp")
+          done
+        done
+      done
+    }
+    host_mt() { host_sources | xargs stat -c %Y | sort -n | tail -1; }
+    build_host() { {{odin}} build "{{HOST}}" -debug {{uiflags}} {{cxx_link}} -out:"$host.new" && mv "$host.new" "$host"; }
+    build_host
     (
-      last=""
+      last="" last_host=$(host_mt)
       while true; do
-        mt=$(stat -c %Y "{{DIR}}"/*.odin | sort -n | tail -1)
+        mt=$(find "{{DIR}}" -name '*.odin' -exec stat -c %Y {} + | sort -n | tail -1)
         if [ "$mt" != "$last" ]; then
           last=$mt
           out=build/hot/$name-$(date +%s%N){{exe}}
@@ -178,23 +205,74 @@ hot DIR TITLE SIZE="1440x960": deps
             echo "hot: build failed; the window keeps the last good build"
           fi
         fi
+        hm=$(host_mt)
+        if [ "$hm" != "$last_host" ]; then
+          last_host=$hm
+          if build_host; then
+            echo "hot: host rebuilt; restarting it"
+            touch "$restart"
+            [ -f "$hostpid" ] && kill "$(cat "$hostpid")" 2>/dev/null || true
+          else
+            echo "hot: host build failed; the window keeps the running host"
+          fi
+        fi
         sleep 0.4
       done
     ) &
     watcher=$!
-    trap 'kill $watcher 2>/dev/null' EXIT
+    trap 'kill $watcher 2>/dev/null; rm -f "$hostpid"' EXIT
     while [ ! -f "$pointer" ]; do sleep 0.2; done
     if command -v hyprctl >/dev/null 2>&1 && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
       ws="${LOGO_WORKSPACE:-$(basename "$(dirname "{{root}}")")/$(basename "{{root}}")}"
       hyprctl eval "hl.window_rule({ match = { title = '^({{TITLE}})$' }, workspace = 'name:$ws' })" >/dev/null || true
     fi
-    build/debug/host{{exe}} "$pointer" "{{TITLE}}" "{{SIZE}}"
+    # The window closing ends the loop; a restart the watcher asked for
+    # starts the host again.
+    while true; do
+      "$host" "$pointer" "{{TITLE}}" "{{SIZE}}" &
+      echo $! > "$hostpid"
+      wait $! || true
+      [ -f "$restart" ] || break
+      rm -f "$restart"
+    done
 
 # Open the logo lab, hot-reloading tools/logo as it is edited
 logo: (hot "tools/logo" "brainfold · logo lab")
 
-# Open the desk prototype, hot-reloading tools/desk as it is edited
-desk: (hot "tools/desk" "brainfold desk" "1280x840")
+# The native libraries jm:ui links: Blend2D draws, kb shapes text, AccessKit
+# serves assistive technology. Each is built or fetched once, into jm.
+#
+# Build or fetch the native libraries jm:ui links
+ui-deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{jm}}"
+    [ -e ui/blend2d/lib/libblend2d.a ] && [ -e ui/kb/lib/kb_text_shape.a ] && [ -e ui/accesskit/lib/libaccesskit.a ] || just blend2d kb accesskit
+
+# The desk's window owns the application (tools/desk/host): the brain CLI
+# answering the view's needs on worker threads. The view, tools/desk, is
+# the hot-reloaded child. BRAIN names another CLI binary than brain on PATH.
+#
+# Open the desk, hot-reloading tools/desk as it is edited
+desk: (hot "tools/desk" "brainfold" "1280x840" "tools/desk/host")
+
+# Render a desk page against this machine's vault to build/desk-PAGE.png
+desk-png PAGE="Activity" THEME="Light": deps ui-deps
+    mkdir -p build/debug
+    {{odin}} build tools/desk -debug {{uiflags}} {{cxx_link}} -out:build/debug/desk{{exe}}
+    build/debug/desk{{exe}} -theme "{{THEME}}" -page "{{PAGE}}" -png "build/desk-{{PAGE}}.png"
+
+# The desk's suites: the CLI client on canned answers, the view in a probe,
+# and the application end to end on its real pipeline and workers.
+#
+# Run the desk's suites
+desk-test: deps ui-deps
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p build/test
+    for p in cli view app; do
+      {{odin}} test tools/desk/$p {{san}} {{uiflags}} {{cxx_link}} -out:build/test/desk-$p{{exe}}
+    done
 
 # branding/ holds the mark tools/logo settled on. The SVGs come from the
 # same geometry the lab draws; the PNGs are rasterised from them, so

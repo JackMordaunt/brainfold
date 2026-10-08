@@ -1,0 +1,162 @@
+package desk_cli
+
+import "core:encoding/cbor"
+import "core:strings"
+import "core:testing"
+
+import "../shapes"
+
+// Canned is a CLI that answers from a table, by its arguments joined with
+// spaces, and remembers what it was asked.
+@(private = "file")
+Canned :: struct {
+	answers: map[string]string,
+	calls:   [dynamic]string,
+}
+
+@(private = "file")
+canned_exec :: proc(user: rawptr, exe: string, args: []string, allocator := context.allocator) -> (stdout: string, ok: bool, stderr: string) {
+	c := (^Canned)(user)
+	key := strings.join(args, " ", context.temp_allocator)
+	append(&c.calls, strings.clone(key, context.temp_allocator))
+	if out, found := c.answers[key]; found {
+		return strings.clone(out, allocator), true, ""
+	}
+	return "", false, strings.clone("unknown command", allocator)
+}
+
+@(private = "file")
+canned :: proc(c: ^Canned) -> Client {
+	c.answers = make(map[string]string, context.temp_allocator)
+	c.calls = make([dynamic]string, context.temp_allocator)
+	return {exec = canned_exec, user = c}
+}
+
+@(private = "file")
+decode :: proc(t: ^testing.T, data: []byte, $T: typeid) -> (v: T) {
+	testing.expect(t, data != nil, "an answer")
+	err := cbor.unmarshal_from_bytes(data, &v, allocator = context.temp_allocator, temp_allocator = context.temp_allocator)
+	testing.expect_value(t, err, nil)
+	return
+}
+
+@(test)
+a_log_is_read_field_for_field :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["log --json"] = `{"backlog":[{"query":"BSA","misses":3,"last":"2026-10-07 21:59:08"}],"answered":["agenda"],"recent":[{"ts":"2026-10-07 21:59:08","query":"prime status","hits":9,"caller":"claude"}],"callers":[{"caller":"claude","queries":611,"sessions":347,"misses":159,"bytes":1512817}]}`
+	data := read(&client, shapes.Log{}, context.temp_allocator)
+	r := decode(t, data, shapes.Log_Result)
+	testing.expect_value(t, r.error, "")
+	testing.expect_value(t, len(r.backlog), 1)
+	testing.expect_value(t, r.backlog[0].query, "BSA")
+	testing.expect_value(t, r.backlog[0].misses, 3)
+	testing.expect_value(t, r.answered[0], "agenda")
+	testing.expect_value(t, r.recent[0].hits, 9)
+	testing.expect_value(t, r.callers[0].bytes, 1512817)
+}
+
+@(test)
+a_recall_passes_each_term_and_reads_the_array :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["recall --json --limit 5 hyprctl eval"] = `[{"id":"85801a30","date":"2026-09-22","agent":"pi","title":"Dedicated workspace","snippet":"use eval"}]`
+	r := decode(t, read(&client, shapes.Recall{terms = "  hyprctl   eval ", limit = 5}, context.temp_allocator), shapes.Recall_Result)
+	testing.expect_value(t, r.error, "")
+	testing.expect_value(t, len(r.turns), 1)
+	testing.expect_value(t, r.turns[0].agent, "pi")
+}
+
+@(test)
+an_empty_recall_asks_nothing :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	r := decode(t, read(&client, shapes.Recall{terms = "  "}, context.temp_allocator), shapes.Recall_Result)
+	testing.expect_value(t, len(r.turns), 0)
+	testing.expect_value(t, r.error, "")
+	testing.expect_value(t, len(c.calls), 0)
+}
+
+@(test)
+a_failure_is_the_results_error :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["doctor --json"] = `{"error":"no vault: run brain install"}`
+	r := decode(t, read(&client, shapes.Doctor{}, context.temp_allocator), shapes.Doctor_Result)
+	testing.expect_value(t, r.error, "no vault: run brain install")
+
+	// No answer at all: what the CLI said on stderr.
+	i := decode(t, read(&client, shapes.Inbox{}, context.temp_allocator), shapes.Inbox_Result)
+	testing.expect_value(t, i.error, "unknown command")
+
+	// An answer that is not the shape: said so, not a crash.
+	c.answers["ledger --json"] = `not json`
+	l := decode(t, read(&client, shapes.Ledger{}, context.temp_allocator), shapes.Ledger_Result)
+	testing.expect(t, strings.contains(l.error, "cannot read"), l.error)
+}
+
+@(test)
+the_vault_is_four_calls_in_one_shape :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["locate --json"] = `{"vault":"/v","tool":"/t"}`
+	c.answers["version --json"] = `{"version":"dev","commit":"1e4e8dc","dirty":false}`
+	c.answers["sync status --json"] = `{"sync":"on","remote":"git@example:brain.git","last":"never","changed":2}`
+	c.answers["review --json"] = `{"review":"after"}`
+	v := decode(t, read(&client, shapes.Vault{}, context.temp_allocator), shapes.Vault_Result)
+	testing.expect_value(t, v.error, "")
+	testing.expect_value(t, v.vault, "/v")
+	testing.expect_value(t, v.commit, "1e4e8dc")
+	testing.expect_value(t, v.changed, 2)
+	testing.expect_value(t, v.review, "after")
+}
+
+@(test)
+approve_finds_the_proposal_by_handle :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["inbox --json"] = `{"proposals":[{"n":1,"handle":"first"},{"n":2,"handle":"second"}]}`
+	c.answers["inbox approve 2"] = "approved"
+	o := act(&client, shapes.Approve{id = 1, handles = {"second"}}, context.temp_allocator)
+	testing.expect(t, o.done && o.ok, o.message)
+	testing.expect_value(t, o.message, "Approved second")
+	testing.expect_value(t, c.calls[len(c.calls) - 1], "inbox approve 2")
+
+	// Gone since the ui drew it: no call, and the person is told.
+	gone := act(&client, shapes.Drop{id = 2, handles = {"third"}}, context.temp_allocator)
+	testing.expect(t, gone.done && !gone.ok)
+	testing.expect(t, strings.contains(gone.message, "no longer in the inbox"), gone.message)
+	testing.expect_value(t, c.calls[len(c.calls) - 1], "inbox --json")
+}
+
+@(test)
+a_failed_command_says_what_the_cli_said :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	o := act(&client, shapes.Sync_Now{id = 1}, context.temp_allocator)
+	testing.expect(t, o.done && !o.ok)
+	testing.expect_value(t, o.message, "unknown command")
+
+	bad := act(&client, shapes.Set_Review{id = 2, mode = "sometimes"}, context.temp_allocator)
+	testing.expect(t, !bad.ok)
+	testing.expect_value(t, len(c.calls), 1)
+}
+
+// A batch finds each proposal afresh, by its handle, and is approved at
+// the place the inbox gives it then.
+@(test)
+a_batch_finds_each_by_handle :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["inbox --json"] = `{"proposals":[{"n":1,"handle":"a"},{"n":2,"handle":"b"},{"n":3,"handle":"c"}]}`
+	c.answers["inbox approve 1"] = "ok"
+	c.answers["inbox approve 3"] = "ok"
+	o := act(&client, shapes.Approve{id = 1, handles = {"a", "c"}}, context.temp_allocator)
+	testing.expect(t, o.ok, o.message)
+	testing.expect_value(t, o.message, "Approved 2 proposals")
+
+	// One gone, one done: not ok, and both counted.
+	part := act(&client, shapes.Drop{id = 2, handles = {"gone", "a"}}, context.temp_allocator)
+	testing.expect(t, !part.ok)
+	testing.expect_value(t, part.message, "Dropped 0 of 2; gone is no longer in the inbox")
+}
