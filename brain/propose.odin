@@ -408,7 +408,7 @@ cmd_inbox :: proc(cli: ^Cli, args: []string) -> int {
 	if !exists {
 		return fail(cli, "inbox empty")
 	}
-	usage := "usage: brain inbox [approve <n>|all [--to MEMORY|LEARNINGS|TUNINGS] | drop <n>]"
+	usage := "usage: brain inbox [approve <n>|all [--to MEMORY|LEARNINGS|TUNINGS] | drop <n> | review <n> | merge <n> --into <handle> [--at FILE:LINE] '<bullet>']"
 	if len(args) < 2 {
 		return fail(cli, usage)
 	}
@@ -438,6 +438,13 @@ cmd_inbox :: proc(cli: ^Cli, args: []string) -> int {
 	}
 	chosen := lines[at]
 	switch args[0] {
+	case "review":
+		if len(args) != 2 {
+			return fail(cli, usage)
+		}
+		return inbox_review(cli, chosen, want)
+	case "merge":
+		return inbox_merge(cli, lines, at, want, args[2:], usage)
 	case "approve":
 		// A hygiene item from tend is an action, not a fact: approving it
 		// applies the action and logs it, and nothing moves into a core file.

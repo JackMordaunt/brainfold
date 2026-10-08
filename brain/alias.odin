@@ -138,16 +138,18 @@ locate_bullet :: proc(cli: ^Cli, handle: string) -> (file: string, line: int, al
 		return "", 0, "", oerr
 	}
 	defer sqlite3.close(&db)
-	n := scalar_int(db, "select count(*) from bullets where handle=?", handle)
+	// A proposal waiting in the inbox is not a bullet yet: one with the
+	// handle of a bullet it repeats does not make that bullet ambiguous.
+	n := scalar_int(db, "select count(*) from bullets where handle=? and file != ?", handle, INBOX_FILE)
 	switch {
 	case n == 0:
 		return "", 0, "", fmt.aprintf("no bullet **%s**", handle)
 	case n > 1:
 		return "", 0, "", fmt.aprintf("%d bullets are **%s**; give one another handle first", n, handle)
 	}
-	file = scalar_text(db, "select file from bullets where handle=?", handle)
-	line = scalar_int(db, "select line from bullets where handle=?", handle)
-	aliases = scalar_text(db, "select aliases from bullets where handle=?", handle)
+	file = scalar_text(db, "select file from bullets where handle=? and file != ?", handle, INBOX_FILE)
+	line = scalar_int(db, "select line from bullets where handle=? and file != ?", handle, INBOX_FILE)
+	aliases = scalar_text(db, "select aliases from bullets where handle=? and file != ?", handle, INBOX_FILE)
 	return
 }
 
