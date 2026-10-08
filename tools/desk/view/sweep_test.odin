@@ -99,6 +99,12 @@ answer :: proc(p: ^ui.Probe, m: ^Model) {
 		warnings = {"the fact is 430 characters (cap 400); say one fact, and spill the rest to a note"},
 		origin   = {ts = "2026-10-08T10:00:00Z", agent = "claude", session = "s1", title = LONG, turn = "t1"},
 	})
+	ui.probe_deliver(p, shapes.Setup{}, shapes.Setup_Result {
+		vault = {path = "/home/jfm/Source/Personal/brain-with-a-long-folder-name/vault", exists = true, bullets = 386},
+		agents = {{name = "claude", installed = true, hooks = true, reading = true}, {name = "pi", installed = true}},
+		lookups = 2332,
+		memories = {sources = 13, new = 46},
+	})
 	ui.probe_deliver(p, shapes.Recall{terms = "harfbuzz shaping cluster", limit = 10}, shapes.Recall_Result{turns = {{id = "x1", date = "2026-09-25", agent = "claude", title = "Text shaping", snippet = LONG}}})
 }
 

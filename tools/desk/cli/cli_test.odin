@@ -234,3 +234,32 @@ a_proposal_is_reviewed_and_merged_by_its_place :: proc(t: ^testing.T) {
 	testing.expect_value(t, o.message, "Merged into Twin at AI/MEMORY.md:4")
 }
 
+@(test)
+setup_is_read_and_its_steps_run :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["--json setup"] = `{"vault":{"path":"","exists":false,"bullets":0},"agents":[{"name":"claude","installed":true,"hooks":false,"reading":false}],"lookups":0,"memories":{"sources":0,"new":0},"sync":false}`
+	r := decode(t, read(&client, shapes.Setup{}, context.temp_allocator), shapes.Setup_Result)
+	testing.expect_value(t, r.error, "")
+	testing.expect(t, !r.vault.exists)
+	testing.expect(t, r.agents[0].installed && !r.agents[0].hooks)
+	c.answers["--json find how do tests run"] = `{"query":"how do tests run","hits":[{"file":"AI/MEMORY.md","line":3,"handle":"tests","fact":"just test"}]}`
+	f := decode(t, read(&client, shapes.Find{terms = " how  do tests run "}, context.temp_allocator), shapes.Find_Result)
+	testing.expect_value(t, f.error, "")
+	testing.expect_value(t, f.hits[0].handle, "tests")
+	// Connecting is the hooks, then the transcripts.
+	c.answers["hooks on --harness claude"] = "claude hooks on"
+	c.answers["recall --enable claude"] = "recall: claude enabled"
+	o := act(&client, shapes.Connect{id = 1, agent = "claude"}, context.temp_allocator)
+	testing.expect(t, o.ok, o.message)
+	testing.expect_value(t, c.calls[len(c.calls) - 2], "hooks on --harness claude")
+	testing.expect_value(t, c.calls[len(c.calls) - 1], "recall --enable claude")
+	c.answers["install --new /home/me/Notes/brain"] = "created"
+	o = act(&client, shapes.New_Vault{id = 2, path = "/home/me/Notes/brain "}, context.temp_allocator)
+	testing.expect(t, o.ok, o.message)
+	testing.expect_value(t, c.calls[len(c.calls) - 1], "install --new /home/me/Notes/brain")
+	// A step that fails says why, and goes no further.
+	o = act(&client, shapes.Connect{id = 3, agent = "pi"}, context.temp_allocator)
+	testing.expect(t, !o.ok)
+	testing.expect_value(t, c.calls[len(c.calls) - 1], "hooks on --harness pi")
+}

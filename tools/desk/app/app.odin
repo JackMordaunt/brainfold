@@ -58,6 +58,8 @@ Kind :: enum u8 {
 	Spend,
 	Imports,
 	Review,
+	Setup,
+	Find,
 }
 
 // Read is one need to answer: what to ask, under which key. A recall's
@@ -245,6 +247,15 @@ read_of :: proc(need: ui.Need) -> (r: Read, ok: bool) {
 		}
 		r.kind = .Check
 		r.terms_len = copy(r.terms[:], q.line)
+	case ui.need_is(need, shapes.Setup):
+		r.kind = .Setup
+	case ui.need_is(need, shapes.Find):
+		q, qok := ui.need_as(need, shapes.Find)
+		if !qok {
+			return {}, false
+		}
+		r.kind = .Find
+		r.terms_len = copy(r.terms[:], q.terms)
 	case ui.need_is(need, shapes.Inbox_Review):
 		q, qok := ui.need_as(need, shapes.Inbox_Review)
 		if !qok {
@@ -329,6 +340,10 @@ clone_command :: proc(c: shapes.Command, allocator: mem.Allocator) -> shapes.Com
 		return shapes.Touch_Bullet{v.id, strings.clone(v.handle, allocator), strings.clone(v.at, allocator)}
 	case shapes.Import:
 		return shapes.Import{v.id, clone_strings(v.paths, allocator)}
+	case shapes.Connect:
+		return shapes.Connect{v.id, strings.clone(v.agent, allocator)}
+	case shapes.New_Vault:
+		return shapes.New_Vault{v.id, strings.clone(v.path, allocator)}
 	case shapes.Merge:
 		return shapes.Merge{v.id, strings.clone(v.proposal, allocator), strings.clone(v.into, allocator), strings.clone(v.at, allocator), strings.clone(v.line, allocator)}
 	case shapes.Set_Price:
@@ -391,6 +406,10 @@ free_command :: proc(c: shapes.Command, allocator: mem.Allocator) {
 		delete(v.at, allocator)
 	case shapes.Import:
 		free_strings(v.paths, allocator)
+	case shapes.Connect:
+		delete(v.agent, allocator)
+	case shapes.New_Vault:
+		delete(v.path, allocator)
 	case shapes.Merge:
 		delete(v.proposal, allocator)
 		delete(v.into, allocator)
@@ -413,7 +432,7 @@ free_command :: proc(c: shapes.Command, allocator: mem.Allocator) {
 // typed is whether a kind of need is asked a key at a time, and so waits
 // out a quiet before it runs.
 typed :: proc(k: Kind) -> bool {
-	return k == .Recall || k == .Check || k == .Plan
+	return k == .Recall || k == .Check || k == .Plan || k == .Find
 }
 
 // recall_key collapses a kind's typed needs to the last: a search or a
@@ -444,7 +463,7 @@ refresh :: proc(h: ^Host, _: Refresh) -> []Read {
 	clear(&h.reads)
 	sync.mutex_lock(&h.mutex)
 	for _, r in h.live {
-		if r.kind != .Recall && r.kind != .Around && r.kind != .Doctor && r.kind != .Check && r.kind != .Plan && r.kind != .Spend && r.kind != .Imports && r.kind != .Review {
+		if r.kind != .Recall && r.kind != .Around && r.kind != .Doctor && r.kind != .Check && r.kind != .Plan && r.kind != .Spend && r.kind != .Imports && r.kind != .Review && r.kind != .Setup && r.kind != .Find {
 			append(&h.reads, r)
 			h.pending += 1
 		}
@@ -485,6 +504,11 @@ read_one :: proc(h: ^Host, r: Read) -> Read_Done {
 		q = shapes.Spend{days = r.limit}
 	case .Imports:
 		q = shapes.Import_Sources{}
+	case .Setup:
+		q = shapes.Setup{}
+	case .Find:
+		terms := r.terms
+		q = shapes.Find{terms = string(terms[:r.terms_len])}
 	case .Review:
 		handle := r.terms
 		q = shapes.Inbox_Review{handle = string(handle[:r.terms_len])}

@@ -30,6 +30,10 @@ main :: proc() {
 	h := new(app.Host)
 	defer free(h)
 	exe := os.get_env("BRAIN", context.allocator)
+	// What the desk itself asks the vault is the desk's, not the agent's
+	// whose terminal started it: the query log says who asked, and brain
+	// takes BRAIN_CALLER over the agent's own variables (caller_id).
+	os.set_env("BRAIN_CALLER", "desk")
 	app.init(h, cli.Client{exe = exe != "" ? exe : "brain"}, shell.wake)
 	defer app.stop(h)
 

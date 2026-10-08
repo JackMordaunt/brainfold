@@ -1006,3 +1006,51 @@ a_proposal_is_merged_into_the_bullet_it_repeats :: proc(t: ^testing.T) {
 	testing.expect(t, !m.merge.open)
 }
 
+// Setup opens by itself once on a machine with no vault, and its steps
+// are a click or two: a folder picked for a new vault, an agent connected,
+// a first find.
+@(test)
+a_new_machine_is_set_up_from_setup :: proc(t: ^testing.T) {
+	m: Model
+	p: ui.Probe
+	open(&p, &m, .Activity)
+	defer close(&p, &m)
+	ui.probe_deliver(&p, shapes.Setup{}, shapes.Setup_Result{agents = {{name = "claude", installed = true}, {name = "pi"}}})
+	ui.probe_frame(&p)
+	ui.probe_frame(&p)
+	testing.expect_value(t, m.page, Page.Setup)
+	testing.expect(t, m.setup_offered)
+	// Not again, once left.
+	testing.expect(t, ui.probe_click(&p, "Activity"))
+	ui.probe_frame(&p)
+	testing.expect_value(t, m.page, Page.Activity)
+	testing.expect(t, ui.probe_click(&p, "Setup"))
+	ui.probe_frame(&p)
+	ui.probe_advance(&p, 2, 0.1)
+	// Connect waits for a vault.
+	testing.expect(t, ui.probe_click(&p, "Connect"))
+	_, early := sent(&p, shapes.Connect)
+	testing.expect(t, !early, "no vault to connect to yet")
+	testing.expect(t, ui.probe_click(&p, "Create a new vault…"))
+	q, asked := ui.probe_picking(&p)
+	testing.expect(t, asked && q.folder, "the folder dialog")
+	testing.expect(t, ui.probe_pick(&p, "/home/me/Notes/brain"))
+	ui.probe_frame(&p)
+	c, ok := sent(&p, shapes.New_Vault)
+	testing.expect(t, ok, "a new vault")
+	testing.expect_value(t, c.path, "/home/me/Notes/brain")
+	ui.probe_deliver(&p, shapes.Outcome{id = c.id}, shapes.Outcome_Result{done = true, ok = true, message = "made"})
+	ui.probe_frame(&p)
+	ui.probe_frame(&p)
+	testing.expect_value(t, m.setup_gen, 1)
+	// Read again: a vault now, so Connect does.
+	ui.probe_deliver(&p, shapes.Setup{gen = 1}, shapes.Setup_Result{vault = {path = "/home/me/Notes/brain", exists = true}, agents = {{name = "claude", installed = true}}})
+	ui.probe_advance(&p, 2, 0.1)
+	testing.expect(t, ui.probe_click(&p, "Connect"))
+	cn, cok := sent(&p, shapes.Connect)
+	testing.expect(t, cok, "a connect")
+	testing.expect_value(t, cn.agent, "claude")
+	ui.text_set(&m.try, "how do the tests run")
+	ui.probe_frame(&p)
+	testing.expect(t, ui.probe_needs_q(&p, shapes.Find{terms = "how do the tests run"}), "a first find")
+}

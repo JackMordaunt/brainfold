@@ -58,6 +58,7 @@ Page :: enum u8 {
 	Bullets,
 	Doctor,
 	Vault,
+	Setup,
 }
 
 PAGE_TITLES := [Page]string {
@@ -69,6 +70,7 @@ PAGE_TITLES := [Page]string {
 	.Bullets  = "Bullets",
 	.Doctor   = "Doctor",
 	.Vault    = "Vault",
+	.Setup    = "Setup",
 }
 
 // WATCH_PAGES is how many pages, from the first, the rail groups under
@@ -85,6 +87,7 @@ PAGE_NOTES := [Page]string {
 	.Bullets  = "Every fact in the vault. Search it, correct it, re-date it, or write a new one.",
 	.Doctor   = "What is stale, thin, oversized, orphaned, or no longer true.",
 	.Vault    = "Where the vault lives, and how it travels between machines.",
+	.Setup    = "Get the vault working on this machine, a step at a time.",
 }
 
 PAGE_ICONS := [Page]primer.Icon {
@@ -96,6 +99,7 @@ PAGE_ICONS := [Page]primer.Icon {
 	.Bullets  = .Book,
 	.Doctor   = .Shield_Check,
 	.Vault    = .Database,
+	.Setup    = .Checklist,
 }
 
 // Pane_Id names a pane, so each keeps its own scroll.
@@ -121,6 +125,7 @@ Pane_Id :: enum u8 {
 	Chart_Finds,
 	Spend_Models,
 	Spend_Agents,
+	Setup,
 	Provenance, // its scrolling part; not a pane of its own
 }
 
@@ -150,6 +155,8 @@ Pending_Kind :: enum u8 {
 	Set_Price,
 	Import,
 	Merge,
+	Connect,
+	New_Vault,
 	Set_Vault,
 }
 
@@ -215,6 +222,9 @@ Model :: struct {
 	price_out: ui.Text_State, // and output tokens
 	import_pick: Import_Pick, // the import dialog
 	merge:     Merge_Edit, // the dialog folding a proposal into a bullet
+	setup_gen: int, // bumped when a step is taken, so setup is read again
+	setup_offered: bool, // Setup has been opened by itself once
+	try:       ui.Text_State, // Setup's first find
 	allocator: mem.Allocator,
 }
 
@@ -231,6 +241,7 @@ model_init :: proc(m: ^Model, allocator := context.allocator) {
 	m.price_out.buf = make([dynamic]u8, allocator)
 	m.import_pick.ticked = make([dynamic]string, allocator)
 	merge_init(&m.merge, allocator)
+	m.try.buf = make([dynamic]u8, allocator)
 	m.spend_window = 1
 	editor_init(&m.editor, allocator)
 	m.selected = make([dynamic]string, allocator)
@@ -252,6 +263,7 @@ model_destroy :: proc(m: ^Model) {
 	}
 	delete(m.import_pick.ticked)
 	merge_destroy(&m.merge)
+	delete(m.try.buf)
 	editor_destroy(&m.editor)
 	for x in m.haystacks.text {
 		delete(x, m.allocator)
@@ -276,13 +288,15 @@ Session :: struct {
 	panes:    [Pane_Id]ui.Scroll_Offset,
 	findings: Finding_List,
 	seen:     [Page]int,
+	offered:  bool,
 }
 
 view :: proc(gtx: ^ui.Ctx, user: rawptr) {
 	m := (^Model)(user)
-	if s := (Session{m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings, m.seen}); ui.restore_struct(gtx, &s, gtx.allocator) {
-		m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings, m.seen = s.page, s.nav_width, s.collapsed, s.theme, s.panes, s.findings, s.seen
+	if s := (Session{m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings, m.seen, m.setup_offered}); ui.restore_struct(gtx, &s, gtx.allocator) {
+		m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings, m.seen, m.setup_offered = s.page, s.nav_width, s.collapsed, s.theme, s.panes, s.findings, s.seen, s.offered
 	}
+	setup_offer(gtx, m)
 	m.scheme = primer.theme_scheme(m.theme)
 	primer.use(&m.scheme, m.theme)
 	primer.use_fonts({0, 1, 2, 3})
@@ -320,12 +334,14 @@ view :: proc(gtx: ^ui.Ctx, user: rawptr) {
 			page_vault(gtx, m)
 		case .Savings:
 			page_savings(gtx, m)
+		case .Setup:
+			page_setup(gtx, m)
 		}
 	}
 	// After the pages, so a command sent this frame needs its outcome now.
 	settle_outcomes(gtx, m)
 	primer.toaster(gtx, &m.toasts)
-	ui.persist_struct(gtx, Session{m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings, m.seen})
+	ui.persist_struct(gtx, Session{m.page, m.nav_width, m.collapsed, m.theme, m.panes, m.findings, m.seen, m.setup_offered})
 }
 
 // rail_collapsed is whether the rail shows only its icons: the person
@@ -427,6 +443,9 @@ nav :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	}
 	if inbox, st := ui.need(gtx, shapes.Inbox{}, shapes.Inbox_Result); ready(st) {
 		waiting[.Inbox] = len(inbox.proposals)
+	}
+	if setup, st := ui.need(gtx, shapes.Setup{gen = m.setup_gen}, shapes.Setup_Result); ready(st) && setup.error == "" {
+		waiting[.Setup] = setup_left(setup)
 	}
 	// A page's dot is news: more waiting than when it was last open.
 	// Opening the page clears it; the count beside its name stays.
@@ -802,6 +821,10 @@ send :: proc(gtx: ^ui.Ctx, m: ^Model, kind: Pending_Kind, handles: []string = ni
 		ui.command(gtx, shapes.Command(shapes.Touch_Bullet{id = id, handle = handles[0], at = arg}))
 	case .Import:
 		ui.command(gtx, shapes.Command(shapes.Import{id = id, paths = handles}))
+	case .Connect:
+		ui.command(gtx, shapes.Command(shapes.Connect{id = id, agent = handles[0]}))
+	case .New_Vault:
+		ui.command(gtx, shapes.Command(shapes.New_Vault{id = id, path = arg}))
 	case .Merge:
 		ui.command(gtx, shapes.Command(shapes.Merge{id = id, proposal = handles[0], into = handles[1], line = arg, at = arg2}))
 	case .Set_Price:
@@ -853,6 +876,9 @@ settle_outcomes :: proc(gtx: ^ui.Ctx, m: ^Model) {
 				m.pricing.len = 0
 			case .Import:
 				m.import_pick.gen += 1
+				m.setup_gen += 1
+			case .Connect, .New_Vault, .Set_Vault:
+				m.setup_gen += 1
 			}
 		}
 		free_handles(p.handles, m.allocator)

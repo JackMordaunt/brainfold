@@ -56,6 +56,10 @@ main :: proc() {
 		return
 	}
 
+	// What the desk itself asks the vault is the desk's, not the agent's
+	// whose terminal started it: the query log says who asked, and brain
+	// takes BRAIN_CALLER over the agent's own variables (caller_id).
+	os.set_env("BRAIN_CALLER", "desk")
 	client := cli.Client{exe = "brain"}
 	size := ops.Size{WIDTH, HEIGHT}
 	args := os.args[1:]

@@ -237,6 +237,57 @@ Bullet :: struct {
 	date:    string,
 }
 
+// Setup is `brain setup`: how far this machine is from a working vault.
+// gen is asked again after a step is taken.
+Setup :: struct {
+	gen: int,
+}
+
+Setup_Result :: struct {
+	vault:    Setup_Vault,
+	agents:   []Setup_Agent,
+	lookups:  int, // what agents have asked the vault so far
+	memories: Setup_Memories,
+	sync:     bool,
+	error:    string,
+}
+
+Setup_Vault :: struct {
+	path:    string, // "" when none is bound
+	exists:  bool, // it is a vault: it has AI/
+	bullets: int,
+}
+
+// Setup_Agent is one agent brain can serve on this machine.
+Setup_Agent :: struct {
+	name:      string,
+	installed: bool,
+	hooks:     bool, // every brain hook is on
+	reading:   bool, // its transcripts are read
+}
+
+Setup_Memories :: struct {
+	sources: int,
+	new:     int, // memories not yet in the vault
+}
+
+// Find is `brain find`: what the vault answers an agent asking terms.
+Find :: struct {
+	terms: string,
+}
+
+Find_Result :: struct {
+	hits:  []Find_Hit,
+	error: string,
+}
+
+Find_Hit :: struct {
+	file:   string,
+	line:   int,
+	handle: string,
+	fact:   string,
+}
+
 // Inbox_Review is `brain inbox review`: what bears on the proposal named
 // handle before it is approved.
 Inbox_Review :: struct {
@@ -470,6 +521,8 @@ Command :: union {
 	Set_Price,
 	Import,
 	Merge,
+	Connect,
+	New_Vault,
 	Set_Vault,
 }
 
@@ -587,6 +640,20 @@ Import :: struct {
 	paths: []string,
 }
 
+// Connect connects brain to an agent: its hooks on, so it is given the
+// vault as it works, and its transcripts read, for recall and spend.
+Connect :: struct {
+	id:    u64,
+	agent: string,
+}
+
+// New_Vault makes a starter vault in an empty folder and binds this
+// machine to it, as brain install --new does.
+New_Vault :: struct {
+	id:   u64,
+	path: string,
+}
+
 // Set_Vault binds this machine to the vault at path, as brain install
 // does: the path recorded, the hooks and agent files pointed at it.
 Set_Vault :: struct {
@@ -633,6 +700,10 @@ command_id :: proc(c: Command) -> u64 {
 	case Import:
 		return v.id
 	case Merge:
+		return v.id
+	case Connect:
+		return v.id
+	case New_Vault:
 		return v.id
 	case Set_Vault:
 		return v.id

@@ -50,6 +50,8 @@ Query :: union {
 	shapes.Spend,
 	shapes.Import_Sources,
 	shapes.Inbox_Review,
+	shapes.Setup,
+	shapes.Find,
 	shapes.Install_Plan,
 	shapes.Vault,
 }
@@ -121,6 +123,21 @@ read :: proc(c: ^Client, q: Query, allocator := context.allocator) -> []byte {
 		return marshal(r, allocator)
 	case shapes.Bullet_Check:
 		return marshal(check(c, q.line), allocator)
+	case shapes.Setup:
+		r: shapes.Setup_Result
+		r.error = call(c, {"--json", "setup"}, &r)
+		return marshal(r, allocator)
+	case shapes.Find:
+		r: shapes.Find_Result
+		if strings.trim_space(q.terms) != "" {
+			args := make([dynamic]string)
+			append(&args, "--json", "find")
+			for term in strings.fields(q.terms) {
+				append(&args, term)
+			}
+			r.error = call(c, args[:], &r)
+		}
+		return marshal(r, allocator)
 	case shapes.Inbox_Review:
 		r: shapes.Inbox_Review_Result
 		if q.handle != "" {
@@ -352,6 +369,14 @@ act :: proc(c: ^Client, cmd: shapes.Command, allocator := context.allocator) -> 
 		return edit(c, at_args({"--json", "bullet", "touch", v.handle}, v.at), "Dated today:")
 	case shapes.Import:
 		return import_sources(c, v.paths)
+	case shapes.Connect:
+		if hooked := step(c, {"hooks", "on", "--harness", v.agent}, ""); !hooked.ok {
+			return hooked
+		}
+		return step(c, {"recall", "--enable", v.agent}, fmt.aprintf("Connected to %s: it is given the vault as it works, and its transcripts are read", v.agent))
+	case shapes.New_Vault:
+		path := strings.trim_space(v.path)
+		return step(c, {"install", "--new", path}, fmt.aprintf("A new vault at %s; this machine uses it", path))
 	case shapes.Merge:
 		n, err := place_of(c, v.proposal)
 		if err != "" {
