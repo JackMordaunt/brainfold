@@ -146,7 +146,7 @@ restating_bullet :: proc(cli: ^Cli, b: Bullet) -> Hit {
 	if ensure_db(cli) != "" {
 		return {}
 	}
-	db, oerr := open_db(cli.db)
+	db, oerr := open_index(cli)
 	if oerr != "" {
 		return {}
 	}

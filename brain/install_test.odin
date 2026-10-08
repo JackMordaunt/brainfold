@@ -290,7 +290,7 @@ reindex_carries_the_bytes_column :: proc(t: ^testing.T) {
 	o, _, _ := exec(f.cli, "find", "sqlite")
 	_, _, code := exec(f.cli, "reindex")
 	testing.expect_value(t, code, 0)
-	db, err := open_db(f.cli.db)
+	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
 	defer sqlite3.close(&db)
 	testing.expect_value(t, scalar_text(db, "select bytes from queries order by id desc limit 1"), int_str(i64(len(o))))

@@ -16,7 +16,7 @@ learn_wires_query_words_to_the_bullets_they_found :: proc(t: ^testing.T) {
 	f := fixture(t)
 	defer fixture_destroy(f)
 	exec(f.cli, "reindex")
-	db, err := open_db(f.cli.db)
+	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
 	rows := [?]string {
 		"(1,'2026-03-01 10:00:00','fulltext index',1,'claude','a')",
@@ -70,7 +70,7 @@ rank_weighting_is_off_unless_asked :: proc(t: ^testing.T) {
 	f := fixture(t)
 	defer fixture_destroy(f)
 	exec(f.cli, "reindex")
-	db, err := open_db(f.cli.db)
+	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
 	for i in 0 ..< 20 {
 		sqlite3.exec_args(db, "insert into serve_outcome(query_id,handle,used,strong) values(?,?,1,0)", i64(i), "libgit2")

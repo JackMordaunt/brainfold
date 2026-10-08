@@ -95,7 +95,7 @@ doctor_names_bullets_served_before_a_correction :: proc(t: ^testing.T) {
 	exec(f.cli, "recall", "--sync")
 	exec(f.cli, "reindex")
 	// A serve in the fixture session, logged a minute before its correction.
-	db, err := open_db(f.cli.db)
+	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
 	sqlite3.exec(db, "insert into queries(id,ts,q,hits,caller,session) values(7,'2026-01-01 10:01:30','filmstrip',1,'claude','sess-one')")
 	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(7,'AI/MEMORY.md','fixture tool',1)")

@@ -122,7 +122,7 @@ cmd_prime :: proc(cli: ^Cli, args: []string) -> int {
 	if err := ensure_db(cli); err != "" {
 		return 0
 	}
-	db, oerr := open_db(cli.db)
+	db, oerr := open_index(cli)
 	if oerr != "" {
 		return 0
 	}

@@ -148,7 +148,11 @@ scan_text :: proc(rel, text: string) -> (s: Scan) {
 
 // parse_bullet reads one `- **handle** ...` line. The date is the last
 // field when it is one; the source is the field before it; the fact is
-// everything between the header and those two, em dashes and all.
+// everything between the header and those two, em dashes and all. A
+// bullet with one field between header and date has a fact and no
+// source: a bullet always says something, and many cite nothing. Until
+// 2026-10-08 that field was read as the source, and such bullets were
+// indexed with no fact, found only by their names.
 parse_bullet :: proc(raw: string, section: string) -> (b: Bullet, ok: bool) {
 	f := strings.split(raw, SEP)
 	n := len(f)
@@ -157,10 +161,11 @@ parse_bullet :: proc(raw: string, section: string) -> (b: Bullet, ok: bool) {
 	b.section = section
 	if n >= 2 && is_iso_date(f[n - 1]) {
 		b.date = f[n - 1]
-		if n >= 3 {
+		switch {
+		case n == 3:
+			b.fact = f[1]
+		case n > 3:
 			b.source = f[n - 2]
-		}
-		if n > 3 {
 			b.fact = strings.join(f[1:n - 2], SEP)
 		}
 	} else if n >= 2 {

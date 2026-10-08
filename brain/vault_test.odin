@@ -81,3 +81,18 @@ list_md_is_relative_sorted_and_skips_git :: proc(t: ^testing.T) {
 	testing.expect_value(t, files[4], "AI/handoffs/2025-12-31-index-note.md")
 	testing.expect_value(t, files[5], "AI/handoffs/2026-01-01-fixture.md")
 }
+
+// A bullet with one field between its header and date says something and
+// cites nothing: the field is its fact, not its source.
+@(test)
+a_three_field_bullet_keeps_its_fact :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	b, ok := parse_bullet("- **veins** (aliases: prime) — planned the prime hook — 2026-10-01", "")
+	testing.expect(t, ok)
+	testing.expect_value(t, b.fact, "planned the prime hook")
+	testing.expect_value(t, b.source, "")
+	b, ok = parse_bullet("- **veins** — planned the prime hook — the plan — 2026-10-01", "")
+	testing.expect(t, ok)
+	testing.expect_value(t, b.fact, "planned the prime hook")
+	testing.expect_value(t, b.source, "the plan")
+}

@@ -54,7 +54,7 @@ cmd_pack :: proc(cli: ^Cli, args: []string) -> int {
 		_, name := repo_here(cli)
 		append(&terms, name)
 	}
-	db, oerr := open_db(cli.db)
+	db, oerr := open_index(cli)
 	if oerr != "" {
 		return fail(cli, oerr)
 	}

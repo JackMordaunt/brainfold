@@ -89,7 +89,7 @@ Tend_Result :: struct {
 // drop, merge. quick leaves out the slow reads (commit claims, the
 // transcripts) for the Stop hook; dry changes nothing and counts.
 tend :: proc(cli: ^Cli, quick, dry: bool) -> (r: Tend_Result, err: string) {
-	db, oerr := open_db(cli.db)
+	db, oerr := open_index(cli)
 	if oerr != "" {
 		return r, oerr
 	}
@@ -220,7 +220,7 @@ apply_date :: proc(cli: ^Cli) -> string {
 	if err := ensure_db(cli); err != "" {
 		return err
 	}
-	db, oerr := open_db(cli.db)
+	db, oerr := open_index(cli)
 	if oerr != "" {
 		return oerr
 	}

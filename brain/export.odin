@@ -115,7 +115,7 @@ cmd_export :: proc(cli: ^Cli, args: []string) -> int {
 		return fail(cli, usage)
 	}
 	root, project := repo_here(cli)
-	db, oerr := open_db(cli.db)
+	db, oerr := open_index(cli)
 	if oerr != "" {
 		return fail(cli, oerr)
 	}

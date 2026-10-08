@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:os"
 import "core:slice"
 import "core:strings"
+import sync_lib "core:sync"
 import "core:time"
 
 import "jm:path"
@@ -56,12 +57,16 @@ index_files :: proc(cli: ^Cli) -> ([]string, os.Error) {
 
 // open_db opens an index database; the message on failure names the file.
 open_db :: proc(p: string) -> (db: sqlite3.Db, err: string) {
-	d, e := sqlite3.open(p)
+	// Several brain processes share the index (an agent's hooks, the
+	// desk's readers); a lock another holds is waited for, not failed on.
+	d, e := sqlite3.open(p, {busy_timeout = BUSY_TIMEOUT})
 	if e != nil {
 		return {}, fmt.aprintf("cannot open %s: %s", p, sql_err(e))
 	}
 	return d, ""
 }
+
+BUSY_TIMEOUT :: 5 * time.Second
 
 sql_err :: proc(e: sqlite3.Error) -> string {
 	if f, ok := e.(sqlite3.Fault); ok {
@@ -139,17 +144,110 @@ create virtual table bullets_fts using fts5(handle, aliases, fact, tokenize='por
 create table lines(id integer primary key, file text, line integer, text text);
 create virtual table lines_fts using fts5(text, tokenize='porter unicode61');
 create table synonyms(term text, expansion text);
-create table queries(id integer primary key, ts text, q text, hits integer,
-  caller text, session text, bytes integer);
-create table query_hits(query_id integer, file text, handle text, rank integer);
-create table claims(file text, line integer, handle text, kind text, text text,
-  verdict text, why text, checked text);
-create table serve_outcome(query_id integer, handle text, used integer, strong integer);
 create table meta(key text primary key, value text);
 `
 
+// LOG_SCHEMA is the evidence: what was asked and served, and what verify
+// found. It lives in log.db beside the index, attached as "log", and is
+// never rebuilt; the index's own statements name its tables bare, which
+// SQLite resolves to the attached file. Until 2026-10-07 these tables were
+// in the index and copied into each rebuild: a lookup logged while a
+// rebuild was swapping in was lost, and a copy that failed lost them all.
+LOG_SCHEMA :: `
+create table if not exists log.queries(id integer primary key, ts text, q text, hits integer,
+  caller text, session text, bytes integer);
+create table if not exists log.query_hits(query_id integer, file text, handle text, rank integer);
+create table if not exists log.claims(file text, line integer, handle text, kind text, text text,
+  verdict text, why text, checked text);
+create table if not exists log.serve_outcome(query_id integer, handle text, used integer, strong integer);
+`
+
+LOG_TABLES :: [?]string{"queries", "query_hits", "claims", "serve_outcome"}
+
+// open_index opens the index with the log attached, moving the log out of
+// an index built before it had a file of its own.
+open_index :: proc(cli: ^Cli) -> (db: sqlite3.Db, err: string) {
+	db, err = open_db(cli.db)
+	if err != "" {
+		return
+	}
+	if e := sqlite3.exec_args(db, "attach ? as log", cli.log_db); e != nil {
+		sqlite3.close(&db)
+		return {}, fmt.aprintf("cannot open %s: %s", cli.log_db, sql_err(e))
+	}
+	if e := sqlite3.exec(db, LOG_SCHEMA); e != nil {
+		sqlite3.close(&db)
+		return {}, fmt.aprintf("cannot open %s: %s", cli.log_db, sql_err(e))
+	}
+	if merr := move_log(db); merr != "" {
+		sqlite3.close(&db)
+		return {}, fmt.aprintf("cannot move the query log into %s: %s", cli.log_db, merr)
+	}
+	return db, ""
+}
+
+// move_log copies the log tables an older index holds into log.db and drops
+// them from the index, in one transaction; two processes doing it at once
+// copy each row once. Until they are dropped, the index's tables would
+// shadow log.db's.
+@(private = "file")
+move_log :: proc(db: sqlite3.Db) -> string {
+	if scalar_int(db, "select count(*) from main.sqlite_master where name='queries'") == 0 {
+		return ""
+	}
+	if e := sqlite3.exec(db, "begin immediate"); e != nil {
+		return sql_err(e)
+	}
+	for t in LOG_TABLES {
+		if scalar_int(db, fmt.tprintf("select count(*) from main.sqlite_master where name='%s'", t)) == 0 {
+			continue
+		}
+		// Older indexes lack columns added since; copy the ones both have.
+		cols := strings.join(shared_columns(db, t), ",", context.temp_allocator)
+		insert := t == "queries" ? "insert or ignore" : "insert"
+		if t != "queries" {
+			// Rows with no key: copied only into an empty table, so a second
+			// mover adds nothing.
+			if scalar_int(db, fmt.tprintf("select count(*) from log.%s", t)) > 0 {
+				sqlite3.exec(db, fmt.tprintf("drop table main.%s", t))
+				continue
+			}
+		}
+		sql := fmt.tprintf("%s into log.%s(%s) select %s from main.%s; drop table main.%s", insert, t, cols, cols, t, t)
+		if e := sqlite3.exec(db, sql); e != nil {
+			sqlite3.exec(db, "rollback")
+			return sql_err(e)
+		}
+	}
+	if e := sqlite3.exec(db, "commit"); e != nil {
+		sqlite3.exec(db, "rollback")
+		return sql_err(e)
+	}
+	return ""
+}
+
+// shared_columns is the columns table t has both in the index and in log.db.
+@(private = "file")
+shared_columns :: proc(db: sqlite3.Db, t: string) -> []string {
+	in_log := make(map[string]bool, allocator = context.temp_allocator)
+	for c in column_texts(db, fmt.tprintf("select name from pragma_table_info('%s', 'log')", t)) {
+		in_log[c] = true
+	}
+	out := make([dynamic]string, context.temp_allocator)
+	for c in column_texts(db, fmt.tprintf("select name from pragma_table_info('%s', 'main')", t)) {
+		if in_log[c] {
+			append(&out, c)
+		}
+	}
+	return out[:]
+}
+
+// builds tells apart the builds one process runs at once.
+@(private = "file")
+builds: int
+
 // sync rebuilds the index from the markdown into a fresh file and swaps it
-// in. The query log is carried across: it is evidence, not derived data.
+// in. The query log is not in it (LOG_SCHEMA), so nothing is carried.
 sync :: proc(cli: ^Cli, quiet: bool) -> string {
 	if err := need_vault(cli); err != "" {
 		return err
@@ -165,8 +263,21 @@ sync :: proc(cli: ^Cli, quiet: bool) -> string {
 		return fmt.aprintf("no markdown found under %s", cli.vault)
 	}
 
-	tmp := strings.concatenate({cli.db, ".new"})
-	os.remove(tmp)
+	// A build of this process's own: several commands run at once (an
+	// agent's hooks, the desk's readers) each find the index stale and
+	// rebuild it, and a shared name let one remove the file another was
+	// writing, which SQLite reports as "attempt to write a readonly
+	// database". Each swaps a whole index in; the last to finish wins.
+	// An index from before log.db holds the log; it moves out before this
+	// build replaces it, or the swap would erase it.
+	if nonempty_file(cli.db) {
+		db, err := open_index(cli)
+		if err != "" {
+			return err
+		}
+		sqlite3.close(&db)
+	}
+	tmp := fmt.aprintf("%s.new-%d-%d", cli.db, os.get_pid(), sync_lib.atomic_add(&builds, 1))
 	db, oerr := open_db(tmp)
 	if oerr != "" {
 		return oerr
@@ -175,9 +286,6 @@ sync :: proc(cli: ^Cli, quiet: bool) -> string {
 		sqlite3.close(&db)
 		os.remove(tmp)
 		return fmt.aprintf("index build failed: %s", err)
-	}
-	if nonempty_file(cli.db) {
-		carry_log(db, cli.db)
 	}
 	sqlite3.exec(db, fmt.tprintf("pragma user_version=%d", SCHEMA))
 	sqlite3.exec_args(db, "insert into meta(key,value) values('review',?)", review_name(review_mode(cli)))
@@ -304,35 +412,21 @@ step :: proc(stmt: ^sqlite3.Stmt, args: ..sqlite3.Value) -> string {
 // row ids are reassigned on every sync, so hits are recorded by handle and
 // copy across unchanged. Failures are ignored: an old file that cannot be
 // read costs the log, not the index.
-carry_log :: proc(db: sqlite3.Db, old_path: string) {
-	if e := sqlite3.exec_args(db, "attach ? as old", old_path); e != nil {
-		return
-	}
-	defer sqlite3.exec(db, "detach old")
-	if sqlite3.exec(db, "select bytes from old.queries limit 0") == nil {
-		sqlite3.exec(db, `insert into queries(id,ts,q,hits,caller,session,bytes)
-			select rowid,ts,q,hits,caller,session,bytes from old.queries`)
-	} else if sqlite3.exec(db, "select caller, session from old.queries limit 0") == nil {
-		sqlite3.exec(db, `insert into queries(id,ts,q,hits,caller,session)
-			select rowid,ts,q,hits,caller,session from old.queries`)
-	} else {
-		sqlite3.exec(db, `insert into queries(id,ts,q,hits,caller,session)
-			select rowid,ts,q,hits,'','' from old.queries`)
-	}
-	sqlite3.exec(db, "insert into query_hits select * from old.query_hits")
-	// Verdicts are evidence of a run, carried until the next one.
-	sqlite3.exec(db, "insert into claims select * from old.claims")
-	sqlite3.exec(db, "insert into serve_outcome select * from old.serve_outcome")
-}
-
-// replace_file moves src over dst, which may exist.
+// replace_file moves src over dst, which may exist. Where rename replaces
+// in one step (POSIX), a reader never finds dst missing; where it cannot,
+// dst is removed first.
 replace_file :: proc(src, dst: string) -> string {
+	if os.rename(src, dst) == nil {
+		return ""
+	}
 	if os.exists(dst) {
 		if err := os.remove(dst); err != nil {
+			os.remove(src)
 			return fmt.aprintf("cannot replace %s: %v", dst, err)
 		}
 	}
 	if err := os.rename(src, dst); err != nil {
+		os.remove(src)
 		return fmt.aprintf("cannot move %s to %s: %v", src, dst, err)
 	}
 	return ""

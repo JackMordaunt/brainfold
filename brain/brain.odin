@@ -28,7 +28,7 @@ import "../term"
 // environment and the recorded tool path both outrank it.
 BRAIN_TOOL :: #config(BRAIN_TOOL, "")
 
-SCHEMA          :: 7 // bump when a table changes shape; ensure_db then rebuilds (7: porter stemming)
+SCHEMA          :: 9 // bump when a table changes shape or what fills it; ensure_db then rebuilds (7: porter stemming, 8: the log moved to log.db, 9: three-field bullets keep their fact)
 MAXLEN          :: 400 // soft cap on a bullet's fact text
 STALE_DAYS      :: 90 // a fact older than this wants re-verification
 FIND_LIMIT      :: 8
@@ -54,6 +54,7 @@ Cli :: struct {
 	conf_sources: string,
 	db:           string,
 	recall_db:    string,
+	log_db:       string, // the query log and verify's verdicts; never rebuilt
 	dry:          bool,
 	stdin:        string, // what a hook handed over; main reads it, a test sets it
 	has_stdin:    bool,
@@ -88,6 +89,7 @@ new_cli :: proc(env: map[string]string = nil, tty := false) -> ^Cli {
 	cli.state = getenv(cli, "BRAIN_STATE", path.join(state_base, "brain"))
 	cli.db = path.join(cli.state, "brain.db")
 	cli.recall_db = path.join(cli.state, "transcripts.db")
+	cli.log_db = path.join(cli.state, "log.db")
 
 	cli.tool = find_tool(cli)
 	cli.vault = find_vault(cli)

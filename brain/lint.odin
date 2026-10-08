@@ -119,7 +119,7 @@ cmd_lint :: proc(cli: ^Cli, args: []string) -> int {
 	}
 
 	if staged && nonempty_file(cli.db) {
-		if db, err := open_db(cli.db); err == "" {
+		if db, err := open_index(cli); err == "" {
 			for h in column_texts(db, "select handle from bullets group by lower(handle) having count(*)>1") {
 				append(&findings, Finding{false, "", h, "duplicate", "duplicate handle in the index"})
 			}

@@ -60,7 +60,7 @@ cmd_verify :: proc(cli: ^Cli, args: []string) -> int {
 	if err := ensure_db(cli); err != "" {
 		return fail(cli, err)
 	}
-	db, oerr := open_db(cli.db)
+	db, oerr := open_index(cli)
 	if oerr != "" {
 		return fail(cli, oerr)
 	}

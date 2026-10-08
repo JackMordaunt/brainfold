@@ -447,7 +447,7 @@ cmd_find :: proc(cli: ^Cli, args: []string) -> int {
 	if len(terms) == 0 {
 		return fail(cli, "usage: brain find <terms...> [--budget <tokens>] [--raw|--terse]")
 	}
-	db, oerr := open_db(cli.db)
+	db, oerr := open_index(cli)
 	if oerr != "" {
 		return fail(cli, oerr)
 	}

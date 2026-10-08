@@ -4,6 +4,7 @@ import "core:encoding/json"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "core:thread"
 
 import "jm:path"
 import "jm:selfupdate"
@@ -80,14 +81,14 @@ exec :: proc(cli: ^Cli, args: ..string) -> (stdout, stderr: string, code: int) {
 
 // count_int runs a one-value query against the fixture's index.
 count_int :: proc(t: ^testing.T, f: Fixture, sql: string) -> int {
-	db, err := open_db(f.cli.db)
+	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
 	defer sqlite3.close(&db)
 	return scalar_int(db, sql)
 }
 
 last_query_row :: proc(t: ^testing.T, f: Fixture) -> string {
-	db, err := open_db(f.cli.db)
+	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
 	defer sqlite3.close(&db)
 	return scalar_text(db, "select hits || ' ' || caller || ' ' || session from queries order by id desc limit 1")
@@ -422,7 +423,7 @@ find_honours_a_budget_and_logs_bytes :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(e, "--budget <tokens>"), "a bad budget says so")
 	o, _, code = exec(f.cli, "find", "fixture")
 	testing.expect_value(t, code, 0)
-	db, err := open_db(f.cli.db)
+	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
 	defer sqlite3.close(&db)
 	got := scalar_text(db, "select bytes from queries order by id desc limit 1")
@@ -446,7 +447,7 @@ pack_briefs_a_project_and_caches_it :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(o, "handoff: AI/handoffs/2026-01-01-fixture.md\n"), "the newest handoff is named")
 	cache := path.join(f.state, "packs", "fixture-1500.txt")
 	testing.expect(t, os.is_file(cache), "the pack is cached")
-	db, err := open_db(f.cli.db)
+	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
 	got := scalar_text(db, "select q || ' ' || bytes from queries order by id desc limit 1")
 	sqlite3.close(&db)
@@ -454,7 +455,7 @@ pack_briefs_a_project_and_caches_it :: proc(t: ^testing.T) {
 
 	// A cache carrying the index's build stamp is served as it is; a sync
 	// writes a new stamp and the next pack is built again.
-	db, err = open_db(f.cli.db)
+	db, err = open_index(f.cli)
 	testing.expect_value(t, err, "")
 	built := scalar_text(db, "select value from meta where key='built'")
 	sqlite3.close(&db)
@@ -492,7 +493,7 @@ pack_infers_the_project_from_the_working_directory :: proc(t: ^testing.T) {
 	testing.expect_value(t, code, 0)
 	testing.expect(t, strings.has_prefix(o, "# brain pack sqlite: "), "a pack for the repo")
 	testing.expect(t, strings.contains(o, " **sqlite** — "), "named after the repo")
-	db, err := open_db(f.cli.db)
+	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
 	defer sqlite3.close(&db)
 	testing.expect_value(t, scalar_text(db, "select q from queries order by id desc limit 1"), "pack sqlite")
@@ -664,7 +665,7 @@ mcp_serves_the_commands_as_tools :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(r, `{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"AI/MEMORY.md:`), r)
 	testing.expect(t, strings.contains(r, `**sqlite**`) && strings.has_suffix(r, `"isError":false}}`), r)
 	testing.expect(t, !strings.contains(r, "(aliases:"), "an mcp caller is an agent: terse")
-	db, err := open_db(f.cli.db)
+	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
 	testing.expect_value(t, scalar_text(db, "select caller || ' ' || session from queries order by id desc limit 1"), "mcp:fixture-client s1")
 	sqlite3.close(&db)
@@ -920,4 +921,117 @@ help_is_styled_only_for_a_person :: proc(t: ^testing.T) {
 	env["AI_AGENT"] = ""
 	o, _, _ = exec(new_cli(env), "help")
 	testing.expect_value(t, o, USAGE)
+}
+
+// Commands that find the index stale at once each rebuild it; none may
+// fail for another's build. A shared temp name let one remove the file
+// another was writing ("attempt to write a readonly database"), as
+// happened when the desk ran several readers at once after an approve.
+@(test)
+rebuilds_at_once_all_succeed :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	N :: 6
+	Job :: struct {
+		cli: ^Cli,
+		err: string,
+	}
+	jobs: [N]Job
+	threads: [N]^thread.Thread
+	for i in 0 ..< N {
+		jobs[i].cli = fixture_cli(f)
+		threads[i] = thread.create_and_start_with_poly_data(&jobs[i], proc(j: ^Job) {
+			context.allocator = context.temp_allocator
+			j.err = sync(j.cli, quiet = true)
+		})
+	}
+	for th in threads {
+		thread.join(th)
+		thread.destroy(th)
+	}
+	for j in jobs {
+		testing.expect_value(t, j.err, "")
+	}
+	// The index in place is a whole one, not left empty by a build that
+	// did nothing: it holds the vault's bullets and answers a find.
+	db, derr := open_db(f.cli.db)
+	testing.expect_value(t, derr, "")
+	testing.expect(t, scalar_int(db, "select count(*) from bullets") > 0, "bullets indexed")
+	sqlite3.close(&db)
+	out, _, code := exec(f.cli, "find", "--json", "fixture tool")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(out, "\"handle\":\"fixture tool\""), out)
+	left, _ := os.read_all_directory_by_path(f.state, context.temp_allocator)
+	for fi in left {
+		testing.expect(t, !strings.contains(fi.name, ".new-"), fi.name)
+	}
+}
+
+// An index from before log.db holds the log in its own tables; the first
+// command moves them out, before any rebuild could replace the file.
+@(test)
+an_old_index_gives_its_log_to_log_db :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	_, _, code := exec(f.cli, "reindex")
+	testing.expect_value(t, code, 0)
+	db, err := open_db(f.cli.db)
+	testing.expect_value(t, err, "")
+	sqlite3.exec(db, `create table queries(id integer primary key, ts text, q text, hits integer, caller text, session text, bytes integer);
+		create table query_hits(query_id integer, file text, handle text, rank integer);
+		insert into queries values(1,'2026-10-01 10:00:00','old one',2,'claude','s1',100),(2,'2026-10-01 10:01:00','old two',0,'pi','s2',0);
+		insert into query_hits values(1,'AI/MEMORY.md','sqlite',1);
+		pragma user_version=7`)
+	sqlite3.close(&db)
+	os.remove(f.cli.log_db)
+	// A schema bump rebuilds the index on this command.
+	_, _, code = exec(f.cli, "log", "--json")
+	testing.expect_value(t, code, 0)
+	logdb, lerr := open_db(f.cli.log_db)
+	testing.expect_value(t, lerr, "")
+	defer sqlite3.close(&logdb)
+	testing.expect_value(t, scalar_int(logdb, "select count(*) from queries where q like 'old %'"), 2)
+	testing.expect_value(t, scalar_int(logdb, "select count(*) from query_hits"), 1)
+	idx, ierr := open_db(f.cli.db)
+	testing.expect_value(t, ierr, "")
+	defer sqlite3.close(&idx)
+	// The index holds no queries table of its own now, and has bullets.
+	testing.expect_value(t, scalar_int(idx, "select count(*) from sqlite_master where name='queries'"), 0)
+	testing.expect(t, scalar_int(idx, "select count(*) from bullets") > 0, "a whole index")
+}
+
+// A lookup logged while another process rebuilds the index is kept: the
+// log is not in the file the rebuild replaces.
+@(test)
+lookups_survive_rebuilds_at_once :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	_, _, code := exec(f.cli, "reindex")
+	testing.expect_value(t, code, 0)
+	N :: 6
+	Job :: struct {
+		cli: ^Cli,
+	}
+	jobs: [N]Job
+	threads: [N]^thread.Thread
+	for i in 0 ..< N {
+		jobs[i].cli = fixture_cli(f)
+		threads[i] = thread.create_and_start_with_poly_data(&jobs[i], proc(j: ^Job) {
+			context.allocator = context.temp_allocator
+			for _ in 0 ..< 5 {
+				run(j.cli, {"find", "--json", "sqlite"})
+				sync(j.cli, quiet = true)
+			}
+		})
+	}
+	for th in threads {
+		thread.join(th)
+		thread.destroy(th)
+	}
+	logdb, _ := open_db(f.cli.log_db)
+	defer sqlite3.close(&logdb)
+	testing.expect_value(t, scalar_int(logdb, "select count(*) from queries where q='sqlite'"), N * 5)
 }
