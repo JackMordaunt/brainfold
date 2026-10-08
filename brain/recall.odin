@@ -29,6 +29,12 @@ create trigger if not exists turn_ad after delete on turn begin
   insert into turn_fts(turn_fts, rowid, body, title)
     values ('delete', old.rowid, old.body, old.title);
 end;
+create table if not exists tool_result(id text primary key, path text, head text);
+create table if not exists usage(
+  id text primary key, adapter text, session text, path text, ts text, model text,
+  input integer, cache_write_5m integer, cache_write_1h integer, cache_read integer,
+  output integer, cost real);
+create index if not exists usage_ts on usage(ts);
 create table if not exists tool(
   id text primary key, turn_id text, session text, path text,
   ts text, cwd text, title text, name text, input text, ok integer);
@@ -85,9 +91,9 @@ open_recall_db :: proc(cli: ^Cli) -> (sqlite3.Db, string) {
 recall_sync :: proc(cli: ^Cli, db: sqlite3.Db, full: bool) -> int {
 	total := 0
 	full := full
-	// A database written before tool calls were read fills its tool table
-	// with one full pass.
-	if !full && scalar_int(db, "select count(*) from tool") == 0 && scalar_int(db, "select count(*) from turn") > 0 {
+	// A database written before tool calls, or token usage, were read
+	// fills that table with one full pass.
+	if !full && scalar_int(db, "select count(*) from turn") > 0 && (scalar_int(db, "select count(*) from tool") == 0 || scalar_int(db, "select count(*) from usage") == 0 || scalar_int(db, "select count(*) from tool_result") == 0) {
 		full = true
 	}
 	for name in adapters_on(cli) {
@@ -117,12 +123,19 @@ recall_sync :: proc(cli: ^Cli, db: sqlite3.Db, full: bool) -> int {
 				db,
 				"insert or ignore into tool(id,turn_id,session,path,ts,cwd,title,name,input,ok) values(?,?,?,?,?,?,?,?,?,?)",
 			)
+			use, _ := sqlite3.prepare(
+				db,
+				"insert or ignore into usage(id,adapter,session,path,ts,model,input,cache_write_5m,cache_write_1h,cache_read,output,cost) values(?,?,?,?,?,?,?,?,?,?,?,?)",
+			)
+			res, _ := sqlite3.prepare(db, "insert or replace into tool_result(id,path,head) values(?,?,?)")
 			for f in changed {
-				ingest_file(cli, a, f, &ins, &src, &tool)
+				ingest_file(cli, a, f, &ins, &src, &tool, &use, &res)
 			}
+			sqlite3.finish(&res)
 			sqlite3.finish(&ins)
 			sqlite3.finish(&src)
 			sqlite3.finish(&tool)
+			sqlite3.finish(&use)
 			sqlite3.exec(db, "commit")
 		}
 		// A transcript that disappeared takes its turns with it.
@@ -135,6 +148,8 @@ recall_sync :: proc(cli: ^Cli, db: sqlite3.Db, full: bool) -> int {
 				if !now[was] {
 					sqlite3.exec_args(db, "delete from turn where path=?", was)
 					sqlite3.exec_args(db, "delete from tool where path=?", was)
+					sqlite3.exec_args(db, "delete from usage where path=?", was)
+					sqlite3.exec_args(db, "delete from tool_result where path=?", was)
 					sqlite3.exec_args(db, "delete from source where path=?", was)
 				}
 			}
@@ -146,7 +161,7 @@ recall_sync :: proc(cli: ^Cli, db: sqlite3.Db, full: bool) -> int {
 
 // ingest_file parses one transcript in its own arena, so a batch of large
 // files does not hold every parsed record until the process exits.
-ingest_file :: proc(cli: ^Cli, a: Adapter, file: string, ins, src, tool: ^sqlite3.Stmt) {
+ingest_file :: proc(cli: ^Cli, a: Adapter, file: string, ins, src, tool, use, res: ^sqlite3.Stmt) {
 	arena: virtual.Arena
 	if virtual.arena_init_growing(&arena) != nil {
 		return
@@ -160,6 +175,19 @@ ingest_file :: proc(cli: ^Cli, a: Adapter, file: string, ins, src, tool: ^sqlite
 	}
 	for c in tr.tools {
 		step(tool, c.id, c.turn_id, c.session, file, c.ts, c.cwd, c.title, c.name, c.input, i64(c.ok ? 1 : 0))
+		if c.result != "" {
+			step(res, c.id, file, c.result)
+		}
+	}
+	for u in tr.usage {
+		if u.id == "" {
+			continue
+		}
+		cost: sqlite3.Value = u.cost
+		if u.cost < 0 {
+			cost = nil
+		}
+		step(use, u.id, a.name, u.session, file, u.ts, u.model, u.input, u.cache_write_5m, u.cache_write_1h, u.cache_read, u.output, cost)
 	}
 	step(src, file, a.name)
 }

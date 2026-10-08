@@ -24,12 +24,37 @@ Turn :: struct {
 Tool :: struct {
 	id, turn_id, ts, session, title, cwd, name, input: string,
 	ok:                                                bool,
+	result:                                            string, // the head of what a brain command printed; "" for any other call
+}
+
+// TOOL_RESULT_MAX bounds the result kept of a brain command: enough to
+// tell an answer from a miss (brain spend), not the whole answer.
+TOOL_RESULT_MAX :: 2000
+
+// tool_result is the head of what call printed, kept only for a command
+// that runs brain.
+tool_result :: proc(call: Tool, printed: string) -> string {
+	if !strings.contains(call.input, "brain ") {
+		return ""
+	}
+	return strings.clone(printed[:min(len(printed), TOOL_RESULT_MAX)])
+}
+
+// Usage is what one model reply cost: its tokens by kind, and its cost
+// in dollars when the agent wrote it down (pi does; Claude Code does not,
+// so brain spend prices its tokens). id is the reply's own, which a
+// streamed reply repeats on every record it writes.
+Usage :: struct {
+	id, session, ts, model:            string,
+	input, cache_write_5m, cache_write_1h, cache_read, output: i64,
+	cost:                              f64, // dollars, or -1 when the agent did not say
 }
 
 // Transcript is what an adapter reads out of one file.
 Transcript :: struct {
 	turns: []Turn,
 	tools: []Tool,
+	usage: []Usage,
 }
 
 Adapter :: struct {
@@ -120,7 +145,9 @@ claude_read :: proc(cli: ^Cli, file: string, need_title: bool) -> (tr: Transcrip
 
 	turns := make([dynamic]Turn)
 	tools := make([dynamic]Tool)
+	usage := make([dynamic]Usage)
 	by_id := make(map[string]int) // tool id -> index in tools
+	billed := make(map[string]bool) // reply ids whose usage is kept
 	for l in lines {
 		v := parse_line(l)
 		obj, is_obj := v.(json.Object)
@@ -130,6 +157,36 @@ claude_read :: proc(cli: ^Cli, file: string, need_title: bool) -> (tr: Transcrip
 		kind := json_string(v, "type")
 		if kind != "user" && kind != "assistant" {
 			continue
+		}
+		// Every reply is paid for, a sidechain's (a subagent's) too, once:
+		// a streamed reply writes its usage on each of its records.
+		if kind == "assistant" {
+			if mid := json_string(v, "message", "id"); mid != "" && !billed[mid] {
+				msg, _ := obj["message"].(json.Object)
+				if u, has := msg["usage"].(json.Object); has {
+					billed[mid] = true
+					append(
+						&usage,
+						Usage {
+							id = mid,
+							session = sid,
+							ts = json_string(v, "timestamp"),
+							model = json_string(v, "message", "model"),
+							input = json_count(u, "input_tokens"),
+							cache_write_5m = json_count(u, "cache_creation", "ephemeral_5m_input_tokens"),
+							cache_write_1h = json_count(u, "cache_creation", "ephemeral_1h_input_tokens"),
+							cache_read = json_count(u, "cache_read_input_tokens"),
+							output = json_count(u, "output_tokens"),
+							cost = -1,
+						},
+					)
+					// A record from before the 5m/1h split has the total alone.
+					last := &usage[len(usage) - 1]
+					if last.cache_write_5m + last.cache_write_1h == 0 {
+						last.cache_write_5m = json_count(u, "cache_creation_input_tokens")
+					}
+				}
+			}
 		}
 		if json_bool(v, "isSidechain") || json_bool(v, "isMeta") {
 			continue
@@ -161,8 +218,11 @@ claude_read :: proc(cli: ^Cli, file: string, need_title: bool) -> (tr: Transcrip
 					},
 				)
 			case "tool_result":
-				if i, known := by_id[json_string(block, "tool_use_id")]; known && json_bool(block, "is_error") {
-					tools[i].ok = false
+				if i, known := by_id[json_string(block, "tool_use_id")]; known {
+					if json_bool(block, "is_error") {
+						tools[i].ok = false
+					}
+					tools[i].result = tool_result(tools[i], content_text(block))
 				}
 			}
 		}
@@ -191,7 +251,7 @@ claude_read :: proc(cli: ^Cli, file: string, need_title: bool) -> (tr: Transcrip
 			},
 		)
 	}
-	return Transcript{turns = turns[:], tools = tools[:]}
+	return Transcript{turns = turns[:], tools = tools[:], usage = usage[:]}
 }
 
 // TOOL_INPUT_MAX bounds the input kept per call: a command or a path, not
@@ -279,6 +339,7 @@ pi_read :: proc(cli: ^Cli, file: string, need_title: bool) -> (tr: Transcript) {
 
 	turns := make([dynamic]Turn)
 	tools := make([dynamic]Tool)
+	usage := make([dynamic]Usage)
 	by_id := make(map[string]int)
 	for l in lines {
 		v := parse_line(l)
@@ -287,9 +348,37 @@ pi_read :: proc(cli: ^Cli, file: string, need_title: bool) -> (tr: Transcript) {
 			continue
 		}
 		role := json_string(v, "message", "role")
+		// pi writes each reply's usage once, with what it cost at its
+		// provider's prices.
+		if role == "assistant" {
+			msg, _ := obj["message"].(json.Object)
+			if u, has := msg["usage"].(json.Object); has {
+				cost := -1.0
+				if _, priced := u["cost"].(json.Object); priced {
+					cost = json_number(u, "cost", "total")
+				}
+				append(
+					&usage,
+					Usage {
+						id = json_string(v, "id"),
+						session = sid,
+						ts = json_string(v, "timestamp"),
+						model = json_string(v, "message", "model"),
+						input = json_count(u, "input"),
+						cache_write_5m = json_count(u, "cacheWrite"),
+						cache_read = json_count(u, "cacheRead"),
+						output = json_count(u, "output"),
+						cost = cost,
+					},
+				)
+			}
+		}
 		if role == "toolResult" {
-			if i, known := by_id[json_string(v, "message", "toolCallId")]; known && json_bool_at(v, "message", "isError") {
-				tools[i].ok = false
+			if i, known := by_id[json_string(v, "message", "toolCallId")]; known {
+				if json_bool_at(v, "message", "isError") {
+					tools[i].ok = false
+				}
+				tools[i].result = tool_result(tools[i], content_text(obj["message"]))
 			}
 			continue
 		}
@@ -344,7 +433,7 @@ pi_read :: proc(cli: ^Cli, file: string, need_title: bool) -> (tr: Transcript) {
 			},
 		)
 	}
-	return Transcript{turns = turns[:], tools = tools[:]}
+	return Transcript{turns = turns[:], tools = tools[:], usage = usage[:]}
 }
 
 // pi_tool_input is the one argument worth searching: the command for
@@ -486,6 +575,30 @@ json_string :: proc(v: json.Value, keys: ..string) -> string {
 	}
 	s, ok := cur.(json.String)
 	return ok ? string(s) : ""
+}
+
+// json_count is the whole number at keys, 0 when it is not there.
+json_count :: proc(v: json.Value, keys: ..string) -> i64 {
+	return i64(json_number(v, ..keys))
+}
+
+// json_number is the number at keys, 0 when it is not there.
+json_number :: proc(v: json.Value, keys: ..string) -> f64 {
+	cur := v
+	for k in keys {
+		obj, ok := cur.(json.Object)
+		if !ok {
+			return 0
+		}
+		cur = obj[k]
+	}
+	#partial switch n in cur {
+	case json.Integer:
+		return f64(n)
+	case json.Float:
+		return f64(n)
+	}
+	return 0
 }
 
 json_bool :: proc(v: json.Value, key: string) -> bool {

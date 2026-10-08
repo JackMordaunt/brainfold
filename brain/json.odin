@@ -78,7 +78,8 @@ jw_int :: proc(w: ^Jw, n: i64) {
 jw_f64 :: proc(w: ^Jw, f: f64) {
 	jw_sep(w)
 	buf: [32]byte
-	strings.write_string(&w.b, strconv.write_float(buf[:], f, 'g', 6, 64))
+	// strconv signs a positive number "+", which JSON does not allow.
+	strings.write_string(&w.b, strings.trim_prefix(strconv.write_float(buf[:], f, 'g', 6, 64), "+"))
 }
 
 jw_bool :: proc(w: ^Jw, v: bool) {

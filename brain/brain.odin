@@ -261,6 +261,8 @@ run :: proc(cli: ^Cli, raw_args: []string) -> int {
 		return cmd_bullet(cli, rest)
 	case "unlink":
 		return cmd_unlink(cli, rest)
+	case "spend":
+		return cmd_spend(cli, rest)
 	case "lint":
 		return cmd_lint(cli, rest)
 	case "secrets":
@@ -347,6 +349,7 @@ Keep it healthy
   brain alias <handle>       a bullet's other names; add|remove <handle> <term>... edits them
   brain bullet list          every bullet; check|write|replace|drop|touch edit one; show where it came from
   brain unlink F N TARGET    make a dead [[TARGET]] on line N of F plain text
+  brain spend [--days N]     what the agents cost, from their transcripts, and what the vault saved
   brain verify [<handle>..]  test the claims bullets make: paths, vault files, subcommands,
                              commits; --apply dates today every bullet whose claims passed
   brain log                  what keeps missing, and who asks
