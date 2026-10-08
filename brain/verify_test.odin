@@ -87,7 +87,7 @@ verify_tests_claims_and_dates_what_passed :: proc(t: ^testing.T) {
 }
 
 @(test)
-doctor_names_bullets_served_before_a_correction_and_contradictions :: proc(t: ^testing.T) {
+doctor_names_bullets_served_before_a_correction :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
 	f := recall_fixture(t)
 	defer fixture_destroy(f)
@@ -100,19 +100,9 @@ doctor_names_bullets_served_before_a_correction_and_contradictions :: proc(t: ^t
 	sqlite3.exec(db, "insert into queries(id,ts,q,hits,caller,session) values(7,'2026-01-01 10:01:30','filmstrip',1,'claude','sess-one')")
 	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(7,'AI/MEMORY.md','fixture tool',1)")
 	sqlite3.close(&db)
-	// Two bullets answering to one alias with nothing in common.
-	testing.expect_value(
-		t,
-		path.append_file(
-			path.join(f.vault, "AI", "LEARNINGS.md"),
-			"- **index engine** (aliases: fts5) — a plain grep across every note, no database — fixture — 2026-01-03\n",
-		),
-		nil,
-	)
 	o, _, code := exec(f.cli, "doctor")
 	testing.expect_value(t, code, 0)
 	testing.expect(t, strings.contains(o, "AI/MEMORY.md **fixture tool** served 2026-01-01 10:01:30, then: No, don't move the filmstrip"), o)
-	testing.expect(t, strings.contains(o, "fts5: **sqlite** (AI/MEMORY.md) and **index engine** (AI/LEARNINGS.md)") || strings.contains(o, "fts5: **index engine** (AI/LEARNINGS.md) and **sqlite** (AI/MEMORY.md)"), o)
 	o, _, _ = exec(f.cli, "doctor", "--json")
 	v, jerr := json.parse_string(o)
 	testing.expect_value(t, jerr, nil)
@@ -121,12 +111,5 @@ doctor_names_bullets_served_before_a_correction_and_contradictions :: proc(t: ^t
 	if len(suspect) == 1 {
 		testing.expect_value(t, json_string(suspect[0], "handle"), "fixture tool")
 		testing.expect_value(t, json_string(suspect[0], "session"), "sess-one")
-	}
-	contra, _ := v.(json.Object)["contradictions"].(json.Array)
-	testing.expect_value(t, len(contra), 1)
-	if len(contra) == 1 {
-		testing.expect_value(t, json_string(contra[0], "name"), "fts5")
-		pair := strings.concatenate({json_string(contra[0], "a"), "+", json_string(contra[0], "b")})
-		testing.expect(t, pair == "sqlite+index engine" || pair == "index engine+sqlite", pair)
 	}
 }

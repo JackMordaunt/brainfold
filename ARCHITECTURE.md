@@ -217,12 +217,13 @@ markdown edit the person commits, so the date means checked rather than
 old. On the working vault the first run named a checkout that had moved
 and commits no local repository held.
 
-Doctor gained three reads on top of its sections: the claims that failed
-the last verify; `suspect`, a bullet served at rank three or better
+Doctor gained two reads on top of its sections: the claims that failed
+the last verify; and `suspect`, a bullet served at rank three or better
 within ten turns before the person corrected the agent in that session,
-which joins the find log to the transcripts on the session id; and
-`contradictions`, two core bullets that answer to one handle or alias
-and share no content word of four or more letters.
+which joins the find log to the transcripts on the session id. A third,
+`contradictions` (two core bullets answering to one name and sharing no
+content word), was dropped on 2026-10-08: it found names two unrelated
+bullets share, which is no fault and wants no action.
 
 ## Reinforcement
 

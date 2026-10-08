@@ -169,7 +169,6 @@ cmd_doctor :: proc(cli: ^Cli, args: []string) -> int {
 	sections := doctor_sections(nq)
 	older := older_notes(db)
 	suspect := suspects(cli, db)
-	contra := contradictions(db)
 	if cli.json {
 		w := jw_make()
 		jw_obj(&w)
@@ -211,18 +210,6 @@ cmd_doctor :: proc(cli: ^Cli, args: []string) -> int {
 			jw_end_obj(&w)
 		}
 		jw_end_arr(&w)
-		jw_key(&w, "contradictions")
-		jw_arr(&w)
-		for c in contra {
-			jw_obj(&w)
-			jw_field(&w, "name", c.name)
-			jw_field(&w, "a", c.a)
-			jw_field(&w, "a_file", c.a_file)
-			jw_field(&w, "b", c.b)
-			jw_field(&w, "b_file", c.b_file)
-			jw_end_obj(&w)
-		}
-		jw_end_arr(&w)
 		jw_end_obj(&w)
 		jw_flush(cli, &w)
 		return 0
@@ -246,10 +233,6 @@ cmd_doctor :: proc(cli: ^Cli, args: []string) -> int {
 	out(cli, "\n== suspect: served within ten turns before the person corrected the agent; the serve may have misled it ==\n")
 	for x in suspect {
 		outf(cli, "%s **%s** served %s, then: %s\n", x.file, x.handle, x.served, x.user)
-	}
-	out(cli, "\n== contradictions: two bullets answer to the same name and share no content word; one is wrong or they want merging ==\n")
-	for c in contra {
-		outf(cli, "%s: **%s** (%s) and **%s** (%s)\n", c.name, c.a, c.a_file, c.b, c.b_file)
 	}
 	return 0
 }
