@@ -5,8 +5,8 @@ import "core:strconv"
 import "core:strings"
 import "core:time"
 
+import git "jm:git"
 import "jm:path"
-import "jm:sh"
 import "jm:sqlite3"
 
 // A timeline is what was worked on, by day and repository, read from the
@@ -19,7 +19,6 @@ import "jm:sqlite3"
 TIMELINE_BUDGET :: 1500 // tokens
 TIMELINE_COMMITS :: 30 // commits listed per repository per window
 TIMELINE_GOAL :: 100 // characters of the first prompt
-GIT_TIMEOUT :: 3 * time.Second
 
 Tl_Session :: struct {
 	session, adapter, title, cwd, day, first, last, goal: string,
@@ -115,7 +114,8 @@ cmd_timeline :: proc(cli: ^Cli, args: []string, week: bool) -> int {
 	if with_git {
 		for &d in tl {
 			for &r in d.repos {
-				r.commits = repo_commits(r.cwd, d.day)
+				since := i64(scalar_int(db, "select strftime('%s', ?, 'utc')", strings.concatenate({d.day, " 00:00:00"})))
+				r.commits = repo_commits(r.cwd, since, since + 24 * 60 * 60)
 			}
 		}
 	}
@@ -237,24 +237,28 @@ timeline_days :: proc(db: sqlite3.Db, from, to, project: string) -> []Tl_Day {
 	return days[:]
 }
 
-// repo_commits is the subjects of the commits made in cwd on one local
-// day, when cwd is on this machine and git answers in time. A directory
-// that is not a repository, or has none, is an empty list.
-repo_commits :: proc(cwd, day: string) -> []string {
-	if cwd == "" || !os.is_dir(cwd) {
+// repo_commits is the subjects of the commits made in the repository cwd
+// is in between the unix times since and until: one local day. A
+// directory that is not in a repository, or one with no commit, is an
+// empty list.
+repo_commits :: proc(cwd: string, since, until: i64) -> []string {
+	if cwd == "" || !os.is_dir(cwd) || since <= 0 {
 		return nil
 	}
-	r := sh.exec(
-		{"git", "log", strings.concatenate({"--since=", day, "T00:00:00"}), strings.concatenate({"--until=", day, "T23:59:59"}), "--format=%s", "-n", int_str(TIMELINE_COMMITS)},
-		{dir = cwd, timeout = GIT_TIMEOUT},
-	)
-	if !r.ok {
+	repo, err := git.discover(cwd)
+	if err != nil {
 		return nil
 	}
+	defer git.close(&repo)
+	commits, _ := git.log(repo, allocator = context.allocator, since = time.unix(since, 0))
 	lines := make([dynamic]string)
-	for l in strings.split_lines(r.stdout) {
-		if strings.trim_space(l) != "" {
-			append(&lines, l)
+	for c in commits {
+		if time.to_unix_seconds(c.at) >= until {
+			continue
+		}
+		append(&lines, c.summary)
+		if len(lines) == TIMELINE_COMMITS {
+			break
 		}
 	}
 	return lines[:]

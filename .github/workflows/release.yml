@@ -28,6 +28,8 @@ env:
   # How many earlier releases a tag publishes patches from. Prereleases
   # count too: a machine on an rc updates by patch like any other.
   PATCH_FROM: "3"
+  # The libgit2 jm:git binds, built static into every binary.
+  LIBGIT2_TAG: v1.9.7
 
 jobs:
   build:
@@ -107,6 +109,31 @@ jobs:
           cl -nologo -O2 -c zstd/vendor/zstd.c -Fozstd/lib/zstd.obj
           lib -nologo -OUT:zstd/lib/zstd.lib zstd/lib/zstd.obj
 
+      # libgit2, static, at the revision jm:git is written against, so the
+      # binary versions and syncs the vault with no git on the machine:
+      # HTTPS through the platform (OpenSSL loaded at run time on Linux),
+      # ssh through the platform's ssh binary. The recipe is jm's CI's;
+      # Intel macOS is cross-built here like the rest of that target. Built
+      # fresh every run, not cached: what this job builds is published, and
+      # a cache another workflow could write would reach the binaries.
+      - name: libgit2
+        shell: bash
+        run: |
+          git clone -q --depth 1 --branch "$LIBGIT2_TAG" https://github.com/libgit2/libgit2 "$RUNNER_TEMP/libgit2"
+          extra=()
+          case "$RUNNER_OS" in
+            Linux)   https=OpenSSL-Dynamic ;;
+            macOS)   https=SecureTransport ;;
+            Windows) https=WinHTTP; extra=(-G Ninja -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded) ;;
+          esac
+          if [ "${{ matrix.target }}" = darwin_amd64 ]; then extra=(-DCMAKE_OSX_ARCHITECTURES=x86_64); fi
+          cmake -S "$RUNNER_TEMP/libgit2" -B "$RUNNER_TEMP/libgit2/build" "${extra[@]}" -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_SSH=exec -DUSE_HTTPS="$https" \
+            -DUSE_BUNDLED_ZLIB=ON -DREGEX_BACKEND=builtin -DUSE_HTTP_PARSER=builtin -DUSE_NTLMCLIENT=OFF -DUSE_SHA256=builtin
+          cmake --build "$RUNNER_TEMP/libgit2/build" --config Release --parallel
+          mkdir -p jm/git/lib
+          if [ "$RUNNER_OS" = Windows ]; then cp "$RUNNER_TEMP/libgit2/build/git2.lib" jm/git/lib/; else cp "$RUNNER_TEMP/libgit2/build/libgit2.a" jm/git/lib/; fi
+
       # A tag build carries its version; any other build is "dev" and will
       # not update itself.
       - name: build
@@ -126,6 +153,7 @@ jobs:
           build/release/${{ matrix.asset }} help | head -1
           if [ "$RUNNER_OS" = Linux ]; then
             ldd build/release/${{ matrix.asset }}
+            ! ldd build/release/${{ matrix.asset }} | grep -q libgit2 || { echo "::error::linked the system libgit2"; exit 1; }
           fi
           BRAIN_VAULT=testdata/vault BRAIN_STATE="$RUNNER_TEMP/state" build/release/${{ matrix.asset }} find sqlite
       # The package's tests and the installer tests, as `just test` runs them

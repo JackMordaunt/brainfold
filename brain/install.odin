@@ -4,8 +4,8 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 
+import git "jm:git"
 import "jm:path"
-import "jm:sh"
 
 // Everything install writes to a file the user owns goes inside a tagged
 // block, so it can be replaced on re-install and removed by `brain uninstall`
@@ -290,12 +290,10 @@ create_vault :: proc(cli: ^Cli, vault: string) -> string {
 			return fmt.aprintf("install: cannot write %s: %v", file, err)
 		}
 	}
-	if _, found := sh.which("git"); found {
-		if r := sh.exec({"git", "init", "-q"}, {dir = vault}); !r.ok {
-			note(cli, "git init failed in %s: %s", vault, sh.error(r))
-		}
+	if repo, err := git.init(vault); err != nil {
+		note(cli, "the vault could not be versioned in %s: %s", vault, fault_text(err))
 	} else {
-		note(cli, "git missing — run 'git init' in %s so its hooks can run", vault)
+		git.close(&repo)
 	}
 	return ""
 }
@@ -384,7 +382,10 @@ cmd_install :: proc(cli: ^Cli, args: []string) -> int {
 	out(cli, "git hooks:\n")
 	// The hooks live outside the vault, so this path has to be absolute.
 	if !cli.dry {
-		sh.exec({"git", "config", "core.hooksPath", hooks}, {dir = vault})
+		if repo, err := git.open(vault); err == nil {
+			git.config_set(repo, "core.hooksPath", hooks)
+			git.close(&repo)
+		}
 	}
 	say(cli, "core.hooksPath = %s", hooks)
 

@@ -4,6 +4,7 @@ import "core:os"
 import "core:strings"
 import "core:text/regex"
 
+import git "jm:git"
 import "jm:path"
 import "jm:sh"
 
@@ -57,15 +58,12 @@ cmd_secrets :: proc(cli: ^Cli, args: []string) -> int {
 	}
 	mode := len(args) > 0 ? args[0] : "--staged"
 	cfg := gitleaks_config(cli)
+	patch := secrets_patch(cli, mode == "--history")
 
 	if gl, found := find_gitleaks(cli); found {
-		argv := make([dynamic]string)
-		append(&argv, gl, "git", cli.vault)
-		if mode != "--history" {
-			append(&argv, "--staged")
-		}
-		append(&argv, "--no-banner", "--redact", "--config", cfg)
-		r := sh.exec(argv[:])
+		// gitleaks reads what was added, as its own git mode does, so a
+		// change that removes a secret is never refused for it.
+		r := sh.exec({gl, "stdin", "--no-banner", "--redact", "--config", cfg}, {stdin = added_lines(patch)})
 		if r.err != nil {
 			return fail(cli, sh.error(r))
 		}
@@ -90,13 +88,7 @@ cmd_secrets :: proc(cli: ^Cli, args: []string) -> int {
 
 	errf(cli, "brain secrets: gitleaks not found — falling back to six built-in patterns.\n")
 	errf(cli, "  install it for the full ruleset: pacman -S gitleaks / brew install gitleaks / scoop install gitleaks\n")
-	r: sh.Result
-	if mode == "--history" {
-		r = sh.exec({"git", "log", "-p", "--no-color"}, {dir = cli.vault})
-	} else {
-		r = sh.exec({"git", "diff", "--cached", "-U0", "--no-color"}, {dir = cli.vault})
-	}
-	hits := fallback_hits(r.stdout)
+	hits := fallback_hits(patch)
 	if cli.json {
 		w := jw_make()
 		jw_obj(&w)
@@ -128,6 +120,40 @@ cmd_secrets :: proc(cli: ^Cli, args: []string) -> int {
 	}
 	outf(cli, "brain secrets: clean (built-in patterns, %s)\n", mode)
 	return 0
+}
+
+// secrets_patch is what is scanned: the staged change, or with history
+// every commit's change, newest first, as `git log -p` prints them.
+secrets_patch :: proc(cli: ^Cli, history: bool) -> string {
+	repo, ok := vault_repo(cli)
+	if !ok {
+		return ""
+	}
+	defer git.close(&repo)
+	if !history {
+		patch, _ := git.diff(repo, staged = true, context_lines = 0)
+		return patch
+	}
+	b := strings.builder_make()
+	commits, _ := git.log(repo)
+	for c in commits {
+		_, patch, _ := git.changes(repo, c.id, context_lines = 0)
+		strings.write_string(&b, patch)
+	}
+	return strings.to_string(b)
+}
+
+// added_lines is the lines a patch adds, without their markers.
+added_lines :: proc(patch: string) -> string {
+	b := strings.builder_make()
+	rest := patch
+	for line in strings.split_lines_iterator(&rest) {
+		if strings.has_prefix(line, "+") && !strings.has_prefix(line, "+++") {
+			strings.write_string(&b, line[1:])
+			strings.write_byte(&b, '\n')
+		}
+	}
+	return strings.to_string(b)
 }
 
 // fallback_hits returns every line matching a built-in pattern, numbered the

@@ -34,7 +34,7 @@ sync_fixture :: proc(t: ^testing.T, f: ^Fixture) -> (origin: string) {
 sync_sends_receives_and_can_be_turned_off :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
 	_, found := sh.which("git")
-	testing.expect(t, found, "sync is built on git; a machine without it cannot run these tests")
+	testing.expect(t, found, "the fixture's repositories are made with git; a machine without it cannot run these tests")
 	if !found {
 		return
 	}
@@ -102,7 +102,7 @@ sync_sends_receives_and_can_be_turned_off :: proc(t: ^testing.T) {
 sync_connect_adopts_an_existing_vault :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
 	_, found := sh.which("git")
-	testing.expect(t, found, "sync is built on git; a machine without it cannot run these tests")
+	testing.expect(t, found, "the fixture's repositories are made with git; a machine without it cannot run these tests")
 	if !found {
 		return
 	}
@@ -131,7 +131,7 @@ sync_runs_in_the_background :: proc(t: ^testing.T) {
 	// On Windows the pass is detached with `start /b` through cmd; this test
 	// runs there too, on CI, and is the only check that path has.
 	_, found := sh.which("git")
-	testing.expect(t, found, "sync is built on git; a machine without it cannot run these tests")
+	testing.expect(t, found, "the fixture's repositories are made with git; a machine without it cannot run these tests")
 	if !found {
 		return
 	}
@@ -162,4 +162,58 @@ sync_runs_in_the_background :: proc(t: ^testing.T) {
 	testing.expect(t, sync_lock(f.cli), "lock taken")
 	testing.expect(t, !sync_lock(f.cli), "a second pass waits")
 	sync_unlock(f.cli)
+}
+
+// Two machines append to the same fact file at once: neither loses its
+// bullet and nothing conflicts, because the fact files merge line by line.
+// The same line changed on both sides is a conflict, named, and this
+// machine keeps its own.
+@(test)
+sync_merges_appends_and_names_a_conflict :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	if _, found := sh.which("git"); !found {
+		testing.expect(t, false, "the fixture's other machine is driven with git")
+		return
+	}
+	f := fixture(t)
+	defer fixture_destroy(f)
+	origin := sync_fixture(t, &f)
+	exec(f.cli, "sync")
+
+	other := path.join(f.root, "other")
+	testing.expect(t, sh.exec({"git", "clone", "-q", origin, other}).ok, "clone")
+	g := proc(dir: string, args: ..string) -> bool {
+		argv := make([dynamic]string)
+		append(&argv, "git", "-c", "user.name=o", "-c", "user.email=o@o", "-c", "commit.gpgsign=false")
+		append(&argv, ..args)
+		return sh.exec(argv[:], {dir = dir}).ok
+	}
+	there := path.join(other, "AI", "MEMORY.md")
+	here := path.join(f.vault, "AI", "MEMORY.md")
+	otext, _ := path.read(there)
+	path.write(there, strings.concatenate({otext, "- **from there** (aliases: other) — appended on the other machine — fixture — 2026-01-08\n"}))
+	testing.expect(t, g(other, "commit", "-qam", "there") && g(other, "push", "-q", "origin", "main"), "the other machine sends")
+	text, _ := path.read(here)
+	path.write(here, strings.concatenate({text, "- **from here** (aliases: this) — appended on this machine — fixture — 2026-01-08\n"}))
+
+	o, _, code := exec(f.cli, "sync")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "sent 1, received 1"), o)
+	merged, _ := path.read(here)
+	testing.expect(t, strings.contains(merged, "**from there**") && strings.contains(merged, "**from here**"), merged)
+
+	// The same line, changed on both sides, in a file that is not a fact
+	// file, so it merges as text.
+	readme := path.join(f.vault, "README.md")
+	path.write(readme, "start\n")
+	exec(f.cli, "sync")
+	testing.expect(t, g(other, "pull", "-q", "origin", "main"), "the other machine catches up")
+	path.write(path.join(other, "README.md"), "there\n")
+	testing.expect(t, g(other, "commit", "-qam", "readme there") && g(other, "push", "-q", "origin", "main"), "the other machine sends its readme")
+	path.write(readme, "here\n")
+	o, _, code = exec(f.cli, "sync")
+	testing.expect_value(t, code, 1)
+	testing.expect(t, strings.contains(o, "both sides changed README.md"), o)
+	mine, _ := path.read(readme)
+	testing.expect_value(t, mine, "here\n")
 }

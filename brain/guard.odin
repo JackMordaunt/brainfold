@@ -7,8 +7,8 @@ import "core:text/regex"
 import "core:unicode"
 import "core:unicode/utf8"
 
+import git "jm:git"
 import "jm:path"
-import "jm:sh"
 
 // Every bullet ends up in an agent's context, so a bullet is a way to steer
 // an agent. The guard refuses the text that does it without a model's help.
@@ -56,8 +56,13 @@ worktree_strict :: proc(vault: string) -> bool {
 }
 
 committed_strict :: proc(vault: string) -> bool {
-	r := sh.exec({"git", "show", strings.concatenate({"HEAD:", POLICY_FILE})}, {dir = vault})
-	return r.ok && policy_strict(r.stdout)
+	repo, err := git.open(vault)
+	if err != nil {
+		return false
+	}
+	defer git.close(&repo)
+	text, found := git.read_file(repo, "HEAD", POLICY_FILE)
+	return found && policy_strict(text)
 }
 
 policy_strict :: proc(text: string) -> bool {

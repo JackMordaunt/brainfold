@@ -41,15 +41,18 @@ targets := "linux_amd64 darwin_arm64 windows_amd64"
 default:
     @just --list --unsorted
 
-# The jm submodule, when JM does not name another checkout, and the SQLite
-# and zstd archives jm:sqlite3 and jm:zstd link (zstd decodes a patched
-# update; see jm/selfupdate).
+# The jm submodule, when JM does not name another checkout, the SQLite and
+# zstd archives jm:sqlite3 and jm:zstd link (zstd decodes a patched update;
+# see jm/selfupdate), and the libgit2 archive jm:git links.
 deps:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{jm}}" = "{{root}}/jm" ] && [ ! -e jm/.git ]; then git submodule update --init jm; fi
     if ! ls "{{jm}}"/sqlite3/lib/sqlite3.* >/dev/null 2>&1; then (cd "{{jm}}" && just sqlite); fi
     if ! ls "{{jm}}"/zstd/lib/zstd.* >/dev/null 2>&1; then (cd "{{jm}}" && just zstd); fi
+    # libgit2, static, so a binary built here versions the vault with no git
+    # on the machine it runs on (jm:git links the system libgit2 without it).
+    if ! ls "{{jm}}"/git/lib/*git2.* >/dev/null 2>&1; then (cd "{{jm}}" && just libgit2); fi
 
 # Debug binary -> build/debug/brain
 build: deps

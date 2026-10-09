@@ -3,8 +3,8 @@ package brain
 import "core:os"
 import "core:strings"
 
+import git "jm:git"
 import "jm:path"
-import "jm:sh"
 import "jm:sqlite3"
 
 // A bullet is stale by its date alone until something checks it. Many
@@ -260,13 +260,18 @@ check_claim :: proc(cli: ^Cli, c: ^Claim) {
 		c.verdict, c.why = "failed", "no such subcommand"
 	case "sha":
 		repos := sha_repos(cli, c.file, c.line)
-		if _, found := sh.which("git"); !found || len(repos) == 0 {
+		if len(repos) == 0 {
 			c.verdict, c.why = "unchecked", "no repository to look in"
 			return
 		}
-		for repo in repos {
-			r := sh.exec({"git", "cat-file", "-e", strings.concatenate({c.text, "^{commit}"})}, {dir = repo, timeout = GIT_TIMEOUT})
-			if r.ok {
+		for dir in repos {
+			repo, err := git.open(dir)
+			if err != nil {
+				continue
+			}
+			_, found := git.resolve(repo, c.text)
+			git.close(&repo)
+			if found {
 				c.verdict = "passed"
 				return
 			}

@@ -8,8 +8,8 @@ import "core:text/regex"
 import "core:time"
 import "core:unicode/utf8"
 
+import git "jm:git"
 import "jm:path"
-import "jm:sh"
 import "jm:sqlite3"
 
 // Hard failures block a commit. Warnings never do. A line that does not parse
@@ -182,14 +182,16 @@ Finding :: struct {
 // staged_lines returns every added line of markdown in the vault's index,
 // tagged with its file.
 staged_lines :: proc(vault: string) -> []Checked {
-	r := sh.exec(
-		{"git", "diff", "--cached", "-U0", "--src-prefix=a/", "--dst-prefix=b/", "--", "*.md", SYNONYMS_FILE},
-		{dir = vault},
-	)
 	lines := make([dynamic]Checked)
+	repo, err := git.open(vault)
+	if err != nil {
+		return lines[:]
+	}
+	defer git.close(&repo)
+	patch, _ := git.diff(repo, staged = true, context_lines = 0, paths = {"*.md", SYNONYMS_FILE})
 	file := ""
 	at := 0
-	rest := r.stdout
+	rest := patch
 	for raw in strings.split_lines_iterator(&rest) {
 		line := strings.trim_suffix(raw, "\r")
 		if strings.has_prefix(line, "+++ b/") {

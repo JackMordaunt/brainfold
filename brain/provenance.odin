@@ -2,7 +2,9 @@ package brain
 
 import "core:fmt"
 import "core:strings"
+import "core:time"
 
+import git "jm:git"
 import "jm:sqlite3"
 
 // bullet_show is one bullet and where it came from, for a person deciding
@@ -131,33 +133,48 @@ Change :: struct {
 // approved, renamed or moved. A vault that is not a git repository has
 // none.
 bullet_history :: proc(cli: ^Cli, handle: string) -> []Change {
-	needle := strings.concatenate({"**", handle, "**"})
-	r := run_git(cli, {"log", "--format=%x1e%h%x1f%ad%x1f%s", "--date=short", "--name-only", "-S", needle, "--", "AI"})
-	if !r.ok {
+	repo, ok := vault_repo(cli)
+	if !ok {
 		return nil
 	}
+	defer git.close(&repo)
+	commits, err := git.log(repo)
+	if err != nil {
+		return nil
+	}
+	needle := strings.concatenate({"**", handle, "**"})
 	out := make([dynamic]Change)
-	for rec in strings.split(r.stdout, "\x1e") {
-		lines := strings.split_lines(strings.trim_space(rec))
-		if len(lines) == 0 || lines[0] == "" {
+	for c in commits {
+		files, patch, cerr := git.changes(repo, c.id, {"AI"}, context_lines = 0)
+		if cerr != nil || !alters_count(patch, needle) {
 			continue
 		}
-		head := strings.split(lines[0], "\x1f")
-		if len(head) != 3 {
-			continue
-		}
-		files := make([dynamic]string)
-		for f in lines[1:] {
-			if name := strings.trim_space(f); name != "" {
-				append(&files, name)
-			}
-		}
-		append(&out, Change{commit = head[0], date = head[1], subject = head[2], files = files[:]})
+		y, m, d := time.date(c.at)
+		date := strings.concatenate({pad4(y), "-", pad2(m), "-", pad2(d)})
+		append(&out, Change{commit = c.id[:7], date = date, subject = c.summary, files = files})
 		if len(out) == 20 {
 			break
 		}
 	}
 	return out[:]
+}
+
+// alters_count is whether patch changes how many times needle appears:
+// more on its added lines than its removed ones, or fewer, as `git log
+// -S` decides whether a commit touched a string.
+alters_count :: proc(patch, needle: string) -> bool {
+	added, removed := 0, 0
+	rest := patch
+	for line in strings.split_lines_iterator(&rest) {
+		switch {
+		case strings.has_prefix(line, "+++") || strings.has_prefix(line, "---"):
+		case strings.has_prefix(line, "+"):
+			added += strings.count(line, needle)
+		case strings.has_prefix(line, "-"):
+			removed += strings.count(line, needle)
+		}
+	}
+	return added != removed
 }
 
 // Origin is the agent turn that proposed a bullet: the session, when,

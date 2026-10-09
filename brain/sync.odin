@@ -4,6 +4,7 @@ import "core:os"
 import "core:strings"
 import "core:time"
 
+import git "jm:git"
 import "jm:path"
 import "jm:sh"
 
@@ -32,13 +33,13 @@ Sync_Mode :: enum {
 }
 
 Sync_Report :: struct {
-	off, no_git, no_repo, connected, offline: bool,
-	remote:                                   string,
-	wrote:                                    int, // files written down here
-	sent, received:                           int, // changes sent and received
-	waiting:                                  string, // why the changes here could not be written down
-	conflict:                                 string, // files both sides changed
-	err:                                      string,
+	off, no_repo, connected, offline: bool,
+	remote:                           string,
+	wrote:                            int, // files written down here
+	sent, received:                   int, // changes sent and received
+	waiting:                          string, // why the changes here could not be written down
+	conflict:                         string, // files both sides changed
+	err:                              string, // why the other machines' changes could not be taken in
 }
 
 // sync_enabled reads BRAIN_SYNC, then the setting `brain sync on|off`
@@ -185,24 +186,6 @@ sync_locked :: proc(cli: ^Cli) -> bool {
 	return taken != "" && taken > iso_after(-SYNC_LOCK_STALE)
 }
 
-// run_git runs one git command in the vault, with a time limit.
-run_git :: proc(cli: ^Cli, args: []string, timeout: time.Duration = 0) -> sh.Result {
-	argv := make([dynamic]string)
-	append(&argv, "git")
-	if len(args) > 0 && args[0] == "commit" {
-		// A write-down is the machine's, not a signed statement of the person's,
-		// so it is not signed: on 2026-10-02 a machine set to sign every commit
-		// failed each write-down with "gpg failed to sign the data".
-		append(&argv, "-c", "commit.gpgsign=false")
-		// A machine with no name set up can still write down what changed.
-		if strings.trim_space(sh.exec({"git", "config", "user.email"}, {dir = cli.vault}).stdout) == "" {
-			append(&argv, "-c", "user.name=brain", "-c", strings.concatenate({"user.email=brain@", host_name()}))
-		}
-	}
-	append(&argv, ..args)
-	return sh.exec(argv[:], {dir = cli.vault, timeout = timeout})
-}
-
 host_name :: proc() -> string {
 	for key in ([2]string{"HOSTNAME", "COMPUTERNAME"}) {
 		if h := os.get_env(key, context.allocator); h != "" {
@@ -222,26 +205,24 @@ vault_sync :: proc(cli: ^Cli, mode: Sync_Mode, force := false) -> (r: Sync_Repor
 		r.off = true
 		return
 	}
-	if _, found := sh.which("git"); !found {
-		r.no_git = true
-		return
-	}
-	if !os.exists(path.join(cli.vault, ".git")) {
+	repo, versioned := vault_repo(cli)
+	if !versioned {
 		r.no_repo = true
 		return
 	}
+	defer git.close(&repo)
 	attrs := path.join(cli.vault, ".gitattributes")
 	if !os.exists(attrs) {
 		path.write(attrs, SYNC_ATTRIBUTES)
 	}
 	if mode == .Full {
-		r.wrote, r.waiting = sync_write_down(cli)
+		r.wrote, r.waiting = sync_write_down(cli, repo)
 	}
-	name := remote_name(cli)
+	name := remote_name(repo)
 	if name == "" {
 		return
 	}
-	r.remote = strings.trim_space(run_git(cli, {"remote", "get-url", name}).stdout)
+	r.remote = remote_url(repo, name)
 	r.connected = true
 	hold := path.join(cli.state, "sync", "offline-until")
 	if !force {
@@ -250,47 +231,41 @@ vault_sync :: proc(cli: ^Cli, mode: Sync_Mode, force := false) -> (r: Sync_Repor
 			return
 		}
 	}
-	branch := strings.trim_space(run_git(cli, {"rev-parse", "--abbrev-ref", "HEAD"}).stdout)
-	if branch == "" || branch == "HEAD" {
+	branch, _, born := git.head(repo)
+	if !born || branch == "" || branch == "HEAD" {
 		branch = "main"
 	}
-	before := strings.trim_space(run_git(cli, {"rev-parse", "HEAD"}).stdout)
-	pull := run_git(cli, {"pull", "--rebase", "--autostash", "-q", name, branch}, mode == .Receive ? SYNC_RECEIVE_TIMEOUT : SYNC_SEND_TIMEOUT)
-	if !pull.ok {
-		text := strings.concatenate({pull.stdout, "\n", pull.stderr})
-		if strings.contains(text, "CONFLICT") || strings.contains(text, "could not apply") {
-			run_git(cli, {"rebase", "--abort"})
-			r.conflict = conflict_files(text)
-		} else if strings.contains(text, "couldn't find remote ref") || strings.contains(text, "no such ref") {
-			// The remote is empty: nothing to receive yet.
-		} else {
-			r.offline = true
-			path.mkdirs(path.dir(hold))
-			path.write(hold, strings.concatenate({iso_after(SYNC_OFFLINE_HOLD), "\n"}))
-			return
+	creds := sync_creds(cli, r.remote)
+	limit := mode == .Receive ? SYNC_RECEIVE_TIMEOUT : SYNC_SEND_TIMEOUT
+	git.set_timeouts(limit, limit)
+	before, _ := git.resolve(repo, "HEAD")
+	if err := git.fetch(repo, name, creds); err != nil {
+		go_offline(&r, hold)
+		return
+	}
+	theirs := strings.concatenate({name, "/", branch})
+	_, remote_has := git.resolve(repo, theirs)
+	if remote_has {
+		// What arrived is what the far side has that this branch did not:
+		// counted before the replay, which also rewrites this side's own.
+		incoming, _ := git.count(repo, before, theirs)
+		r.conflict, r.err = sync_take_in(repo, branch, theirs, born)
+		if after, _ := git.resolve(repo, "HEAD"); after != before && r.conflict == "" && r.err == "" {
+			r.received = before != "" ? incoming : 0
+			sync(cli, quiet = true)
 		}
 	}
-	after := strings.trim_space(run_git(cli, {"rev-parse", "HEAD"}).stdout)
-	if before != "" && after != "" && before != after {
-		r.received = count_commits(cli, strings.concatenate({before, "..", after}))
-		sync(cli, quiet = true)
-	}
-	if mode == .Full {
+	if mode == .Full && r.conflict == "" && r.err == "" {
 		// Until the far side has been seen once, everything here is ahead.
-		ahead := 0
-		if strings.trim_space(run_git(cli, {"rev-parse", "--verify", "-q", strings.concatenate({name, "/", branch})}).stdout) != "" {
-			ahead = count_commits(cli, strings.concatenate({name, "/", branch, "..HEAD"}))
-		} else {
-			ahead = count_commits(cli, "HEAD")
-		}
+		ahead, _ := git.count(repo, remote_has ? theirs : "", "HEAD")
 		if ahead > 0 {
-			push := run_git(cli, {"push", "-q", "-u", name, strings.concatenate({"HEAD:", branch})}, SYNC_SEND_TIMEOUT)
-			if push.ok {
+			if err := git.push(repo, name, branch, creds); err == nil {
 				r.sent = ahead
+				// What `push -u` records, for anyone who runs git here by hand.
+				git.config_set(repo, strings.concatenate({"branch.", branch, ".remote"}), name)
+				git.config_set(repo, strings.concatenate({"branch.", branch, ".merge"}), strings.concatenate({"refs/heads/", branch}))
 			} else {
-				r.offline = true
-				path.mkdirs(path.dir(hold))
-				path.write(hold, strings.concatenate({iso_after(SYNC_OFFLINE_HOLD), "\n"}))
+				go_offline(&r, hold)
 			}
 		}
 	}
@@ -302,31 +277,84 @@ vault_sync :: proc(cli: ^Cli, mode: Sync_Mode, force := false) -> (r: Sync_Repor
 	return
 }
 
+// go_offline marks the pass offline and holds the next reach back for
+// SYNC_OFFLINE_HOLD.
+go_offline :: proc(r: ^Sync_Report, hold: string) {
+	r.offline = true
+	path.mkdirs(path.dir(hold))
+	path.write(hold, strings.concatenate({iso_after(SYNC_OFFLINE_HOLD), "\n"}))
+}
+
+// sync_take_in brings the other machines' commits onto this branch: this
+// machine's own commits are replayed on top of theirs, and whatever has
+// not been written down is put aside meanwhile and brought back after.
+// When a commit of ours cannot be replayed cleanly nothing changes and
+// conflict names the files; the fact files merge line by line
+// (SYNC_ATTRIBUTES), so two machines that each appended never get here.
+sync_take_in :: proc(repo: git.Repo, branch, theirs: string, born: bool) -> (conflict, err: string) {
+	if !born {
+		// Nothing here yet: the branch starts where the far side is.
+		if e := git.checkout(repo, branch, theirs); e != nil {
+			return "", fault_text(e)
+		}
+		return "", ""
+	}
+	if behind, _ := git.count(repo, "HEAD", theirs); behind == 0 {
+		return "", ""
+	}
+	who := identity(repo)
+	aside, serr := git.stash(repo, "brain sync: not written down yet", who)
+	if serr != nil {
+		return "", fault_text(serr)
+	}
+	files, rerr := git.rebase(repo, theirs, who)
+	if aside {
+		if e := git.unstash(repo); e != nil && rerr == nil && len(files) == 0 {
+			err = strings.concatenate({"what was not written down is kept aside (git stash): ", fault_text(e)})
+		}
+	}
+	if len(files) > 0 {
+		return strings.join(files, ", "), err
+	}
+	if rerr != nil {
+		return "", fault_text(rerr)
+	}
+	return "", err
+}
+
 // remote_name is where the vault meets other machines: `origin` when there
 // is one, else the first remote the vault has (a vault versioned by hand may
 // call it `github`), else nothing.
-remote_name :: proc(cli: ^Cli) -> string {
-	names := strings.fields(run_git(cli, {"remote"}).stdout)
-	for n in names {
-		if n == "origin" {
-			return n
+remote_name :: proc(repo: git.Repo) -> string {
+	rs, _ := git.remotes(repo)
+	for r in rs {
+		if r.name == "origin" {
+			return r.name
 		}
 	}
-	return len(names) > 0 ? names[0] : ""
+	return len(rs) > 0 ? rs[0].name : ""
 }
 
 // sync_write_down commits everything that changed in the vault, through its
 // own gates (lint, secrets). When a gate refuses, the first line it said is
 // what the person sees.
-sync_write_down :: proc(cli: ^Cli) -> (wrote: int, waiting: string) {
-	run_git(cli, {"add", "-A"})
-	staged := run_git(cli, {"diff", "--cached", "--name-only"})
-	files := strings.fields(staged.stdout)
-	if len(files) == 0 {
+sync_write_down :: proc(cli: ^Cli, repo: git.Repo) -> (wrote: int, waiting: string) {
+	if err := git.add(repo, {"."}); err != nil {
+		return 0, fault_text(err)
+	}
+	entries, _ := git.status(repo)
+	files := 0
+	for e in entries {
+		if e.index != .None {
+			files += 1
+		}
+	}
+	if files == 0 {
 		return 0, ""
 	}
-	// The vault's own gates run here, not only as hooks: a vault versioned by
-	// hand has none, and a bad line must still wait.
+	// The vault's own gates run here, not only as hooks: libgit2 runs no
+	// hooks, a vault versioned by hand has none, and a bad line must still
+	// wait.
 	for gate in ([2]string{"lint", "secrets"}) {
 		mark := strings.builder_len(cli.out)
 		emark := strings.builder_len(cli.err)
@@ -335,7 +363,7 @@ sync_write_down :: proc(cli: ^Cli) -> (wrote: int, waiting: string) {
 		resize(&cli.out.buf, mark)
 		resize(&cli.err.buf, emark)
 		if code != 0 {
-			run_git(cli, {"reset", "-q"})
+			git.unstage(repo)
 			for l in strings.split_lines(said) {
 				t := strings.trim_space(l)
 				if t != "" && !strings.has_prefix(t, "brain lint:") && !strings.has_prefix(t, "brain secrets:") {
@@ -345,42 +373,15 @@ sync_write_down :: proc(cli: ^Cli) -> (wrote: int, waiting: string) {
 			return 0, strings.concatenate({"the vault's ", gate, " check refused the change"})
 		}
 	}
-	msg := strings.concatenate({"sync: ", int_str(i64(len(files))), len(files) == 1 ? " file" : " files", " from ", host_name()})
-	r := run_git(cli, {"commit", "-q", "-m", msg})
-	if !r.ok {
-		run_git(cli, {"reset", "-q"})
-		for l in strings.split_lines(strings.concatenate({r.stderr, "\n", r.stdout})) {
-			if t := strings.trim_space(l); t != "" {
-				return 0, t
-			}
+	msg := strings.concatenate({"sync: ", int_str(i64(files)), files == 1 ? " file" : " files", " from ", host_name()})
+	if _, err := git.commit(repo, msg, identity(repo)); err != nil {
+		git.unstage(repo)
+		if t := fault_text(err); t != "" {
+			return 0, t
 		}
 		return 0, "the change could not be written down"
 	}
-	return len(files), ""
-}
-
-count_commits :: proc(cli: ^Cli, range: string) -> int {
-	r := run_git(cli, {"rev-list", "--count", range})
-	if !r.ok {
-		return 0
-	}
-	n := 0
-	for c in strings.trim_space(r.stdout) {
-		if c >= '0' && c <= '9' {
-			n = n * 10 + int(c - '0')
-		}
-	}
-	return n
-}
-
-conflict_files :: proc(text: string) -> string {
-	files := make([dynamic]string)
-	for l in strings.split_lines(text) {
-		if i := strings.index(l, "Merge conflict in "); i >= 0 {
-			append(&files, strings.trim_space(l[i + len("Merge conflict in "):]))
-		}
-	}
-	return len(files) > 0 ? strings.join(files[:], ", ") : "a file"
+	return files, ""
 }
 
 now_iso :: proc() -> string {
@@ -421,17 +422,15 @@ sync_say :: proc(cli: ^Cli, r: Sync_Report) -> int {
 		jw_field_int(&w, "received", i64(r.received))
 		jw_field(&w, "waiting", r.waiting)
 		jw_field(&w, "conflict", r.conflict)
+		jw_field(&w, "error", r.err)
 		jw_field(&w, "offline", r.offline ? "true" : "false")
 		jw_end_obj(&w)
 		jw_flush(cli, &w)
-		return r.waiting != "" || r.conflict != "" ? 1 : 0
+		return r.waiting != "" || r.conflict != "" || r.err != "" ? 1 : 0
 	}
 	switch {
 	case r.off:
 		out(cli, "sync is off for this machine; brain sync on turns it on\n")
-		return 0
-	case r.no_git:
-		out(cli, "sync needs git on this machine; the vault is kept here only\n")
 		return 0
 	case r.no_repo:
 		out(cli, "the vault is not versioned yet; brain install sets that up\n")
@@ -455,6 +454,10 @@ sync_say :: proc(cli: ^Cli, r: Sync_Report) -> int {
 		out(cli, "offline; what changed here is safe and goes when the connection is back\n")
 		return 0
 	}
+	if r.err != "" {
+		outf(cli, "the other machines' changes could not be taken in, and nothing was sent: %s\n", r.err)
+		return 1
+	}
 	switch {
 	case r.sent > 0 && r.received > 0:
 		outf(cli, "sent %d, received %d\n", r.sent, r.received)
@@ -471,13 +474,16 @@ sync_say :: proc(cli: ^Cli, r: Sync_Report) -> int {
 sync_status :: proc(cli: ^Cli) -> int {
 	on := sync_enabled(cli)
 	remote := ""
-	if os.exists(path.join(cli.vault, ".git")) {
-		if name := remote_name(cli); name != "" {
-			remote = strings.trim_space(run_git(cli, {"remote", "get-url", name}).stdout)
+	changed := 0
+	if repo, ok := vault_repo(cli); ok {
+		if name := remote_name(repo); name != "" {
+			remote = remote_url(repo, name)
 		}
+		entries, _ := git.status(repo)
+		changed = len(entries)
+		git.close(&repo)
 	}
 	last := strings.trim_space(first_line(path.join(cli.state, "sync", "last")))
-	changed := len(strings.fields(run_git(cli, {"status", "--porcelain"}).stdout))
 	if cli.json {
 		w := jw_make()
 		jw_obj(&w)
@@ -507,44 +513,57 @@ sync_status :: proc(cli: ^Cli) -> int {
 // sync_connect names where the machines meet: a URL, or a new private
 // repository on GitHub made with gh.
 sync_connect :: proc(cli: ^Cli, where_: string) -> int {
-	if !os.exists(path.join(cli.vault, ".git")) {
-		if r := run_git(cli, {"init", "-q"}); !r.ok {
+	repo, versioned := vault_repo(cli)
+	if !versioned {
+		made, err := git.init(cli.vault)
+		if err != nil {
 			return fail(cli, "the vault could not be versioned")
 		}
+		repo = made
 	}
+	defer git.close(&repo)
 	url := where_
 	if where_ == "github" {
 		if _, found := sh.which("gh"); !found {
 			return fail(cli, "connect github needs the gh command signed in; or give a URL: brain sync connect <url>")
 		}
+		// gh makes the repository and prints its address; the vault is
+		// pointed at it here, so gh never has to drive git.
 		name := path.base(cli.vault)
-		r := sh.exec({"gh", "repo", "create", name, "--private", "--source", cli.vault, "--remote", "origin"}, {dir = cli.vault, timeout = 30 * time.Second})
+		r := sh.exec({"gh", "repo", "create", name, "--private"}, {dir = cli.vault, timeout = 30 * time.Second})
 		if !r.ok {
 			return fail(cli, strings.concatenate({"github did not create the repository: ", strings.trim_space(sh.error(r))}))
 		}
-		url = strings.trim_space(run_git(cli, {"remote", "get-url", "origin"}).stdout)
-	} else {
-		existing := strings.trim_space(run_git(cli, {"remote", "get-url", "origin"}).stdout)
-		if existing != "" {
-			run_git(cli, {"remote", "set-url", "origin", url})
-		} else if r := run_git(cli, {"remote", "add", "origin", url}); !r.ok {
-			return fail(cli, strings.concatenate({"could not connect: ", strings.trim_space(sh.error(r))}))
+		url = strings.trim_space(r.stdout)
+		if i := strings.last_index_byte(url, '\n'); i >= 0 {
+			url = strings.trim_space(url[i + 1:])
 		}
+		if !strings.has_suffix(url, ".git") {
+			url = strings.concatenate({url, ".git"})
+		}
+	}
+	if remote_url(repo, "origin") != "" {
+		git.remote_set_url(repo, "origin", url)
+	} else if err := git.remote_add(repo, "origin", url); err != nil {
+		return fail(cli, strings.concatenate({"could not connect: ", fault_text(err)}))
 	}
 	// A vault that is still the starter adopts what is already there: the
 	// second machine's first connect should end with the first machine's
 	// vault, not a merge of two welcome pages.
-	if count_commits(cli, "HEAD") <= 1 && vault_is_starter(cli) {
-		branch := "main"
-		if f := run_git(cli, {"fetch", "-q", "origin"}, SYNC_SEND_TIMEOUT); f.ok {
-			if head := strings.trim_space(run_git(cli, {"symbolic-ref", "--short", "refs/remotes/origin/HEAD"}).stdout); head != "" {
-				branch = strings.trim_prefix(head, "origin/")
-			} else if strings.trim_space(run_git(cli, {"rev-parse", "--verify", "-q", "origin/master"}).stdout) != "" {
-				branch = "master"
+	if n, _ := git.count(repo, "", "HEAD"); n <= 1 && vault_is_starter(cli) {
+		creds := sync_creds(cli, url)
+		git.set_timeouts(SYNC_SEND_TIMEOUT, SYNC_SEND_TIMEOUT)
+		if git.fetch(repo, "origin", creds) == nil {
+			branch, berr := git.default_branch(repo, "origin", creds)
+			if berr != nil || branch == "" {
+				branch = "main"
+				if _, ok := git.resolve(repo, "origin/master"); ok {
+					branch = "master"
+				}
 			}
-			if strings.trim_space(run_git(cli, {"rev-parse", "--verify", "-q", strings.concatenate({"origin/", branch})}).stdout) != "" {
-				// -f: the starter files on disk give way to the vault being adopted.
-				run_git(cli, {"checkout", "-q", "-f", "-B", branch, strings.concatenate({"origin/", branch})})
+			if _, ok := git.resolve(repo, strings.concatenate({"origin/", branch})); ok {
+				// The starter files on disk give way to the vault being adopted.
+				git.checkout(repo, branch, strings.concatenate({"origin/", branch}))
 				sync(cli, quiet = true)
 			}
 		}

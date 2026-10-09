@@ -121,7 +121,10 @@ each added facts never conflict.
 
 Under the hood this is git: the vault is a repository, write-downs are
 commits (unsigned, by `brain`, with the machine's name when none is set),
-connect adds a remote, receive is a rebase pull and send a push.
+connect adds a remote, receive is a rebase pull and send a push. git is
+linked in, so none is needed on the machine. An HTTPS remote that asks who
+is pushing gets the token in `BRAIN_SYNC_TOKEN`, or for GitHub the one `gh`
+is signed in with; an ssh remote uses ssh and its agent.
 
 ## The hooks
 
@@ -160,6 +163,7 @@ Recall is opt in, once per agent: `brain recall --enable claude`.
 | `BRAIN_NO_TEND` | set to skip the daily sweep |
 | `BRAIN_SYNC` | `off` keeps the vault on this machine |
 | `BRAIN_CONNECT` | at `brain install`: where the vault meets other machines |
+| `BRAIN_SYNC_TOKEN` | the token an HTTPS remote is given when it asks who is pushing |
 | `BRAIN_CALLER` | name the caller in the log; agents are detected without it |
 | `BRAIN_COLOR` | `always`, `never` or `auto` |
 

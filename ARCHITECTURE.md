@@ -140,11 +140,17 @@ returns in milliseconds; the pass takes a lock under the state directory so
 two stops in a row do not race, keeps the time limits as its own safety, and
 a failed reach sets a ten-minute hold that the hook checks before starting
 anything.
-The write-down runs the vault's own gates (lint, secrets) before committing,
-so a vault without hooks still refuses a bad line, and commits unsigned
-(signing wants an agent a hook does not have) as `brain` when the machine has
-no name set. Receive is `pull --rebase --autostash`; a conflict aborts and
-is reported by file; a `.gitattributes` with `AI/*.md merge=union` makes
+All of it goes through jm:git, libgit2 linked into the binary, so a machine
+without git versions and syncs the vault all the same; HTTPS remotes take a
+token from `BRAIN_SYNC_TOKEN` or, for GitHub, from `gh auth token`, and ssh
+remotes go through the platform's ssh and its agent. The write-down runs the
+vault's own gates (lint, secrets) before committing, since libgit2 runs no
+hooks and a vault without them must still refuse a bad line, and commits
+unsigned as `brain` when the machine has no name set. Receive fetches, puts
+whatever is not written down aside, replays this machine's commits on the
+far side's (a rebase), and brings the aside back; the replay is worked out
+in memory first, so a conflict changes nothing and is reported by file; a
+`.gitattributes` with `AI/*.md merge=union` makes
 appended facts merge line by line. `connect` adds or replaces `origin`
 (`github` makes a private repository with gh); a vault that is still the
 untouched starter adopts the connected one instead of merging two welcome
@@ -475,8 +481,8 @@ one full pass. Three commands read it:
 - `brain day [YYYY-MM-DD]` and `brain week [--since Nd]` are the
   timeline: sessions by local day and the directory they ran in, each
   with its title, its first prompt as the goal, its span and turn count,
-  then the repository's commits in the window from `git log` when the
-  directory is on this machine.
+  then the repository's commits in the window, read from its history
+  when the directory is on this machine.
 
 ### Adding an agent
 
@@ -524,12 +530,14 @@ no notes at all.
 
 ## Requirements
 
-To run: one static binary. SQLite with FTS5 is linked in; nothing is needed
-on PATH. `git` is used by `brain lint --staged`, `brain secrets`, and the
-hooks. `gitleaks` is optional and improves `brain secrets`.
+To run: one static binary. SQLite with FTS5 and libgit2 are linked in;
+nothing is needed on PATH. `git` itself only runs the vault's hooks, which
+exist where git does; `brain sync` writes down through the same gates
+without it. `gitleaks` is optional and improves `brain secrets`.
 
-To build: [Odin](https://odin-lang.org) and the jm collection. `just build`
-fetches the submodule and builds its SQLite archive when either is missing;
+To build: [Odin](https://odin-lang.org), the jm collection, and CMake for
+libgit2. `just build` fetches the submodule and builds its SQLite, zstd and
+libgit2 archives when any is missing;
 `JM=<path>` builds against another checkout instead.
 
 ## Development
