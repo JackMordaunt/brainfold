@@ -27,7 +27,7 @@ inbox_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	st := ui.stack_open(gtx)
 	defer ui.close(&st)
 	busy := waiting_on(m, .Import)
-	if primer.button(gtx, "Import memories…", .Default, .Medium, leading = .Download, loading = busy) && !busy {
+	if primer.button(gtx, "Import", .Default, .Medium, leading = .Download, loading = busy) && !busy {
 		open_import(m)
 	}
 	primer.tooltip(gtx, "Bring in what Claude Code and Gemini CLI remembered on their own. Each memory waits here as a proposal; what the vault already says is left out.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)

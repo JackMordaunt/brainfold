@@ -126,6 +126,7 @@ Pane_Id :: enum u8 {
 	Spend_Models,
 	Spend_Agents,
 	Setup,
+	Setup_Step,
 	Provenance, // its scrolling part; not a pane of its own
 }
 
@@ -224,6 +225,8 @@ Model :: struct {
 	merge:     Merge_Edit, // the dialog folding a proposal into a bullet
 	setup_gen: int, // bumped when a step is taken, so setup is read again
 	setup_offered: bool, // Setup has been opened by itself once
+	setup_step: Setup_Step, // the step Setup shows, once chosen
+	setup_chosen: bool, // the person chose a step, rather than the first not done
 	try:       ui.Text_State, // Setup's first find
 	allocator: mem.Allocator,
 }

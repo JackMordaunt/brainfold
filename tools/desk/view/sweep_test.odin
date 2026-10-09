@@ -105,6 +105,9 @@ answer :: proc(p: ^ui.Probe, m: ^Model) {
 		lookups = 2332,
 		memories = {sources = 13, new = 46},
 	})
+	ui.probe_deliver(p, shapes.Find{terms = "how do I run the tests"}, shapes.Find_Result {
+		hits = {{file = "AI/MEMORY.md", line = 8, handle = "brainfold test", fact = LONG}, {file = "AI/MEMORY.md", line = 9, handle = "desk test", fact = LONG}, {file = "AI/LEARNINGS.md", line = 3, handle = "proof suite", fact = LONG}, {file = "AI/LEARNINGS.md", line = 4, handle = "sweep", fact = LONG}},
+	})
 	ui.probe_deliver(p, shapes.Recall{terms = "harfbuzz shaping cluster", limit = 10}, shapes.Recall_Result{turns = {{id = "x1", date = "2026-09-25", agent = "claude", title = "Text shaping", snippet = LONG}}})
 }
 
@@ -123,6 +126,11 @@ VARIANTS := [?]Variant {
 	{"thin aliases chosen", proc(m: ^Model) {m.findings, m.findings_chosen = .Thin_Aliases, true}},
 	{"no search", proc(m: ^Model) {ui.text_set(&m.search, "")}},
 	{"a bullet's provenance", proc(m: ^Model) {m.bullet_tab = 1}},
+	{"setup on the agents", proc(m: ^Model) {m.setup_step, m.setup_chosen = .Agents, true}},
+	{"setup on a find", proc(m: ^Model) {
+		m.setup_step, m.setup_chosen = .Try, true
+		ui.text_set(&m.try, "how do I run the tests")
+	}},
 	{"every proposal ticked", proc(m: ^Model) {
 		for h in ([3]string{"jm:ui menu steals focus back", "init_context threads own their temp allocator", "brain doctor contradictions dropped"}) {
 			select(m, h, true)

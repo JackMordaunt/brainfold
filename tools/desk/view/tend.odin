@@ -732,7 +732,7 @@ where_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	st2 := ui.stack_open(gtx)
 	// The system's own folder dialog chooses; what it would change is then
 	// shown before it is used.
-	if primer.button(gtx, "Change vault…", .Default, leading = .File_Directory, loading = moving) && !moving {
+	if primer.button(gtx, "Change", .Default, leading = .File_Directory, loading = moving) && !moving {
 		ui.pick_folder(gtx, VAULT_PICK, ready(st) ? v.vault : "")
 	}
 	primer.tooltip(gtx, "Use the vault in another folder on this machine: its notes answer every agent from then on.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
@@ -784,7 +784,7 @@ move_dialog :: proc(gtx: ^ui.Ctx, m: ^Model, current: string) {
 				ui.sized(gtx, {min = {fw, 0}, max = {fw, ui.INF}})
 				primer.text_input(gtx, &m.vault_path, placeholder = "/path/to/vault", leading = .File_Directory, block = true, name = "Vault folder")
 			}
-			if primer.button(gtx, "Browse…", .Default) {
+			if primer.button(gtx, "Browse", .Default) {
 				ui.pick_folder(gtx, VAULT_PICK, path != "" ? path : current)
 			}
 		}
