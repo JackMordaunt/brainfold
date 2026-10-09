@@ -195,6 +195,203 @@ jobs:
           path: build/release/mkpatch
           if-no-files-found: error
 
+  # The desk, tools/desk with its host, for each target, uploaded as a
+  # workflow artifact and never as a release asset: desk binaries ship only
+  # through Polar. It links jm:ui's native libraries, built here as jm's
+  # test.yml builds them, fresh every run for the reason libgit2 is above.
+  # SDL3 is the platform's at run time on Linux and macOS; on Windows its
+  # DLL and AccessKit's travel beside the executables. The smoke renders the
+  # fixture vault's Bullets page headless through the brain this run built.
+  desk:
+    needs: build
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux_amd64
+            asset: desk-linux-amd64
+            brain: brain-linux-amd64
+            accesskit: linux/x86_64/static
+          - os: macos-latest
+            target: darwin_arm64
+            asset: desk-darwin-arm64
+            brain: brain-darwin-arm64
+            accesskit: macos/arm64/static
+          # Cross-built on the arm64 runner like the CLI, so it is not run.
+          - os: macos-latest
+            target: darwin_amd64
+            asset: desk-darwin-amd64
+            accesskit: macos/x86_64/static
+            cc: cc -arch x86_64
+            arch: x86_64
+          - os: windows-latest
+            target: windows_amd64
+            asset: desk-windows-amd64
+            brain: brain-windows-amd64.exe
+            accesskit: windows/x86_64/msvc/shared
+            exe: .exe
+    runs-on: ${{ matrix.os }}
+    env:
+      # The release vendor:sdl3 in ODIN_PIN is bound against.
+      SDL3_TAG: release-3.4.2
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        if: runner.os == 'Windows'
+      - uses: laytan/setup-odin@8536d8fa450ec6f1bd9ddc84bbaaf16296c0051d # v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ env.ODIN_REPO }}
+          branch: ${{ env.ODIN_PIN }}
+          release: ""
+          llvm-version: ${{ env.ODIN_LLVM }}
+          build-type: release
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+        with:
+          just-version: "1.58.0"
+
+      - name: sdl3 (homebrew)
+        if: matrix.target == 'darwin_arm64'
+        run: |
+          brew install --quiet sdl3
+          echo "LINKFLAGS=-L$(brew --prefix)/lib" >> "$GITHUB_ENV"
+      # SDL3 from source where no package serves: on Linux, console-only,
+      # since nothing here opens a window and Ubuntu has no package; on the
+      # Intel macOS build, the x86_64 library Homebrew on arm64 cannot give.
+      - name: sdl3 (source)
+        if: matrix.target == 'linux_amd64' || matrix.target == 'darwin_amd64'
+        run: |
+          prefix="$RUNNER_TEMP/sdl3"
+          extra=()
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ninja-build
+            extra=(-G Ninja -DSDL_UNIX_CONSOLE_BUILD=ON)
+          fi
+          if [ -n "${{ matrix.arch }}" ]; then extra+=(-DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}); fi
+          git -c advice.detachedHead=false clone -q --depth 1 --branch "$SDL3_TAG" https://github.com/libsdl-org/SDL "$RUNNER_TEMP/sdl3-src"
+          cmake -S "$RUNNER_TEMP/sdl3-src" -B "$RUNNER_TEMP/sdl3-src/build" "${extra[@]}" -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$prefix" -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+          cmake --build "$RUNNER_TEMP/sdl3-src/build" --parallel
+          cmake --install "$RUNNER_TEMP/sdl3-src/build"
+          lib=$(dirname "$(find "$prefix" -name 'libSDL3.*' -print -quit)")
+          echo "LINKFLAGS=-L$lib" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$lib" >> "$GITHUB_ENV"
+
+      # kb_text_shape, jm:ui/shape's shaper, from the vendored source; the
+      # Windows recipe is PowerShell, so cl runs directly.
+      - name: kb_text_shape
+        if: runner.os != 'Windows'
+        run: cd jm && CC="${{ matrix.cc || 'cc' }}" just kb
+      - name: kb_text_shape (windows)
+        if: runner.os == 'Windows'
+        env:
+          MSYS_NO_PATHCONV: 1
+        run: |
+          cd jm && mkdir -p ui/kb/lib
+          cl -nologo -std:c11 -O2 -c ui/kb/vendor/kb_text_shape.c -Foui/kb/lib/kb_text_shape.obj
+          lib -nologo -OUT:ui/kb/lib/kb_text_shape.lib ui/kb/lib/kb_text_shape.obj
+
+      # Blend2D, static, with asmjit, at the revisions jm's justfile pins;
+      # clang-cl on Windows, where MSVC crashes on its deflate decoder.
+      - name: blend2d
+        run: |
+          # fetch <repo> <jm justfile variable> <dir>
+          fetch() {
+            local rev
+            rev=$(sed -n "s/^$2 *:= *\"\([0-9a-f]*\)\".*/\1/p" jm/justfile)
+            [ -n "$rev" ] || { echo "::error::no $2 in jm/justfile"; exit 1; }
+            mkdir -p "$3" && git -C "$3" init -q
+            git -C "$3" fetch -q --depth 1 "https://github.com/$1/$1" "$rev"
+            git -C "$3" checkout -q FETCH_HEAD
+          }
+          src="$RUNNER_TEMP/blend2d"
+          fetch blend2d blend2d_rev "$src"
+          fetch asmjit asmjit_rev "$src/3rdparty/asmjit"
+          extra=()
+          case "$RUNNER_OS" in
+            Windows) extra=(-G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded) ;;
+          esac
+          if [ -n "${{ matrix.arch }}" ]; then extra+=(-DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}); fi
+          cmake -S "$src" -B "$src/build" "${extra[@]}" -DCMAKE_BUILD_TYPE=Release -DBLEND2D_STATIC=ON -DBLEND2D_TEST=OFF
+          cmake --build "$src/build" --config Release --parallel
+          mkdir -p jm/ui/blend2d/lib
+          if [ "$RUNNER_OS" = Windows ]; then cp "$src/build/blend2d.lib" jm/ui/blend2d/lib/; else cp "$src/build/libblend2d.a" jm/ui/blend2d/lib/; fi
+
+      # AccessKit: the release jm's justfile pins, checked by its hash, and
+      # the member for the target rather than the runner, so the Intel
+      # macOS build gets the x86_64 archive.
+      - name: accesskit
+        run: |
+          value() { sed -n "s/^$1 *:= *\"\([^\"]*\)\".*/\1/p" jm/justfile; }
+          ver=$(value accesskit_ver) sha=$(value accesskit_sha)
+          zip="$RUNNER_TEMP/accesskit.zip"
+          curl -sSL --max-time 600 -o "$zip" "https://github.com/AccessKit/accesskit-c/releases/download/$ver/accesskit-c-$ver.zip"
+          if command -v sha256sum >/dev/null; then sum=$(sha256sum "$zip" | cut -d' ' -f1); else sum=$(shasum -a 256 "$zip" | cut -d' ' -f1); fi
+          [ "$sum" = "$sha" ] || { echo "::error::accesskit-c $ver has sha256 $sum, expected $sha"; exit 1; }
+          member="accesskit-c-$ver/lib/${{ matrix.accesskit }}/*"
+          if command -v unzip >/dev/null; then unzip -q "$zip" "$member" -d "$RUNNER_TEMP/accesskit"; else 7z x -y -o"$RUNNER_TEMP/accesskit" "$zip" "$member" >/dev/null; fi
+          mkdir -p jm/ui/accesskit/lib
+          cp "$RUNNER_TEMP/accesskit/accesskit-c-$ver/lib/${{ matrix.accesskit }}"/* jm/ui/accesskit/lib/
+          ls -l jm/ui/accesskit/lib
+
+      - name: build
+        run: |
+          out=build/desk/${{ matrix.asset }}
+          mkdir -p "$out"
+          link=()
+          if [ -n "${LINKFLAGS:-}" ]; then link=(-extra-linker-flags:"$LINKFLAGS"); fi
+          # desk <package> <binary>
+          desk() {
+            odin build "$1" -o:speed -vet -strict-style -collection:jm="$PWD/jm" \
+              -target:${{ matrix.target }} "${link[@]}" -out:"$out/$2${{ matrix.exe }}"
+          }
+          desk tools/desk desk
+          desk tools/desk/host desk-host
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp "$(odin root)/vendor/sdl3/SDL3.dll" jm/ui/accesskit/lib/accesskit.dll "$out/"
+          fi
+          ls -l "$out"
+
+      # The brain this run built answers the desk; the page has rendered
+      # only once the vault's bullets are in it.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: matrix.brain
+        with:
+          name: ${{ matrix.brain }}
+          path: build/brain
+      - name: smoke test
+        if: matrix.brain
+        run: |
+          brain="$PWD/build/brain/${{ matrix.brain }}"
+          chmod +x "$brain"
+          if [ "$RUNNER_OS" = Linux ]; then ldd build/desk/${{ matrix.asset }}/desk; fi
+          if [ "$RUNNER_OS" = macOS ]; then otool -L build/desk/${{ matrix.asset }}/desk; fi
+          BRAIN_VAULT=testdata/vault BRAIN_STATE="$RUNNER_TEMP/state" \
+            build/desk/${{ matrix.asset }}/desk${{ matrix.exe }} -brain "$brain" -page Bullets \
+            -png build/${{ matrix.asset }}.png -dump > build/dump.txt
+          grep -q 'fixture tool' build/dump.txt || { echo "::error::the Bullets page never showed the fixture vault"; cat build/dump.txt; exit 1; }
+          head -c 8 build/${{ matrix.asset }}.png | od -An -tx1 | grep -q '89 50 4e 47' || { echo "::error::no PNG written"; exit 1; }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.asset }}
+          path: build/desk/${{ matrix.asset }}
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.brain
+        with:
+          name: ${{ matrix.asset }}-smoke
+          path: build/${{ matrix.asset }}.png
+          if-no-files-found: error
+
   publish:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
@@ -202,10 +399,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      # The CLI's assets and mkpatch only: the desk's artifacts never reach
+      # a release.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: assets
+          pattern: brain-*
           merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mkpatch
+          path: assets
       # Beside each asset, mkpatch writes its zstd-compressed form and a
       # patch to it from the same asset in each of the last PATCH_FROM
       # releases, named <asset>.<old sha256>.patch so a binary finds the
