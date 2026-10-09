@@ -63,6 +63,8 @@ cmd_sync :: proc(cli: ^Cli, args: []string) -> int {
 	}
 	// The child the hooks start: one pass, no words.
 	if args[0] == "--quiet" {
+		// Detached, so the hook's process group ending does not end it.
+		leave_session()
 		mode := Sync_Mode.Full
 		if len(args) > 1 && args[1] == "--receive" {
 			mode = .Receive
@@ -114,8 +116,8 @@ SYNC_LOCK_STALE :: 2 * time.Minute
 
 // sync_in_background starts one pass as a process of its own and returns at
 // once, so a hook never holds the session for the network. The child is
-// detached from the hook's process group (each platform's branch below says
-// how), inherits what it needs by name, and keeps the time limits as its
+// detached from the hook's process group (start_detached says how, for
+// each platform), inherits what it needs by name, and keeps the time limits as its
 // own safety. The checks that cost nothing run here first, so an
 // offline machine on hold does not start a process to find out.
 sync_in_background :: proc(cli: ^Cli, mode: Sync_Mode) {
@@ -141,9 +143,26 @@ sync_in_background :: proc(cli: ^Cli, mode: Sync_Mode) {
 	}
 	// The child inherits by name what the pass needs, as this process sees
 	// it (the tests give their Cli an environment of its own), and the
-	// decision already made here: sync is on.
+	// decision already made here: sync is on. Windows' own libraries need
+	// SYSTEMROOT, the temporary directories and the profile folders to load
+	// and run; the other platforms have none of these, and skip them.
 	env := make([dynamic]string)
-	for key in ([6]string{"PATH", "HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "SSH_AUTH_SOCK"}) {
+	names := [?]string {
+		"PATH",
+		"HOME",
+		"USERPROFILE",
+		"XDG_CONFIG_HOME",
+		"XDG_STATE_HOME",
+		"SSH_AUTH_SOCK",
+		"SYSTEMROOT",
+		"WINDIR",
+		"TEMP",
+		"TMP",
+		"APPDATA",
+		"LOCALAPPDATA",
+		"PROGRAMDATA",
+	}
+	for key in names {
 		if v := getenv(cli, key); v != "" {
 			append(&env, strings.concatenate({key, "=", v}))
 		}
@@ -153,17 +172,7 @@ sync_in_background :: proc(cli: ^Cli, mode: Sync_Mode) {
 	append(&env, "BRAIN_SYNC=on")
 	append(&env, "BRAIN_NO_UPDATE=1")
 	flag := mode == .Receive ? "--receive" : "--full"
-	when ODIN_OS == .Windows {
-		cmd := strings.concatenate({"start \"\" /b \"", exe, "\" sync --quiet ", flag})
-		sh.capture(cmd, {dir = cli.vault, env = env[:], shell = .Cmd, timeout = 5 * time.Second})
-	} else {
-		// sh returns as soon as the child is in the background; the child's
-		// descriptors are closed or sent to /dev/null, so nothing waits on them.
-		sh.exec(
-			{"sh", "-c", `setsid "$0" "$@" </dev/null >/dev/null 2>&1 &`, exe, "sync", "--quiet", flag},
-			{dir = cli.vault, env = env[:], timeout = 5 * time.Second},
-		)
-	}
+	start_detached({exe, "sync", "--quiet", flag}, cli.vault, env[:])
 }
 
 // sync_lock takes the one-pass-at-a-time lock, unless a live pass holds it.
