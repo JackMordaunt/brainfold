@@ -140,6 +140,15 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = Windows ]; then export SAN=; fi
           just test
+      # The desk's suites, as `just desk-test` runs them locally: the view
+      # swept at every window size, the CLI client and the app on canned
+      # answers. Same sanitizer rule as above.
+      - name: desk test
+        if: matrix.target != 'darwin_amd64'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then export SAN=; fi
+          just desk-test
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.asset }}

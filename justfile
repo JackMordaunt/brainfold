@@ -263,15 +263,17 @@ desk-png PAGE="Activity" THEME="Light": deps ui-deps
     build/debug/desk{{exe}} -theme "{{THEME}}" -page "{{PAGE}}" -png "build/desk-{{PAGE}}.png"
 
 # The desk's suites: the CLI client on canned answers, the view in a probe,
-# and the application end to end on its real pipeline and workers.
+# and the application end to end on its real pipeline and workers. None
+# draws pixels or opens a window, so none links Blend2D, kb or AccessKit:
+# CI runs them with no ui-deps to build.
 #
 # Run the desk's suites
-desk-test: deps ui-deps
+desk-test: deps
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p build/test
     for p in cli view app; do
-      {{odin}} test tools/desk/$p {{san}} {{uiflags}} {{cxx_link}} -out:build/test/desk-$p{{exe}}
+      {{odin}} test tools/desk/$p {{san}} {{uiflags}} -out:build/test/desk-$p{{exe}}
     done
 
 # branding/ holds the mark tools/logo settled on. The SVGs come from the
