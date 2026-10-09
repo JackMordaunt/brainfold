@@ -96,5 +96,8 @@ brain mcp                            # the same tools over MCP, for agents witho
 
 ## Licence
 
-Apache-2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). The brainfold name
-and mark are not covered; see [branding/README.md](branding/README.md).
+Apache-2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). The desk, in
+[tools/desk](tools/desk), is the exception: it is FSL-1.1-ALv2, see
+[tools/desk/LICENSE.md](tools/desk/LICENSE.md). Each desk release becomes
+Apache-2.0 two years after it is published. The brainfold name and mark are
+not covered; see [branding/README.md](branding/README.md).

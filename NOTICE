@@ -4,5 +4,9 @@ Copyright 2026 Jack Mordaunt
 This product includes software developed by Jack Mordaunt
 (https://mordaunt.dev/code/brainfold).
 
+The desk, in tools/desk, is licensed under the Functional Source
+License, Version 1.1, ALv2 Future License (FSL-1.1-ALv2); see
+tools/desk/LICENSE.md.
+
 The brainfold name and mark are not licensed under the Apache License;
 see branding/README.md.
