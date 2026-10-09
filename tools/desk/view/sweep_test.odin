@@ -73,7 +73,7 @@ answer :: proc(p: ^ui.Probe, m: ^Model) {
 		file = "AI/MEMORY.md",
 		line = 8,
 		handle = "jm:ui menu steals focus back",
-		served = {times = 1234, sessions = 210, top = 400, first = "2026-09-01 10:00:00", last = "2026-10-08 10:00:00", callers = {{caller = "claude", times = 1200}, {caller = "pi", times = 34}}, queries = {{query = LONG, times = 900}, {query = "focus", times = 334}}, days = {{day = "2026-10-07", times = 30}, {day = "2026-10-08", times = 40}}},
+		served = {times = 1_234_567_890, sessions = 210, top = 400, first = "2026-09-01 10:00:00", last = "2026-10-08 10:00:00", callers = {{caller = "claude", times = 1200}, {caller = "pi", times = 34}}, queries = {{query = LONG, times = 900}, {query = "focus", times = 334}}, days = {{day = "2026-10-07", times = 30}, {day = "2026-10-08", times = 40}}},
 		claims = {{kind = "path", text = "~/Source/Personal/sonar/gui/view/actions.odin", verdict = "passed", checked = "2026-10-08"}},
 		history = {{commit = "eaa5237", date = "2026-10-02", subject = "sync: 2 files from omarchy", files = {"AI/INBOX.md", "AI/MEMORY.md"}}},
 		proposed = {ts = "2026-10-02T20:50:08Z", agent = "claude", session = "s1", title = LONG, turn = "t1"},

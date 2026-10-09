@@ -988,20 +988,37 @@ boxed :: proc(gtx: ^ui.Ctx, padding: f32 = 0, key: u64 = 0, loc := #caller_locat
 
 // stat is one figure in a box: what it counts, the number, and a note on
 // one line, so every card in a row is one height; the whole note shows
-// on hover.
+// on hover. A figure too wide for its card is set smaller, on a line as
+// tall as a large one, rather than wrapped.
 stat :: proc(gtx: ^ui.Ctx, label, value, note: string, width: f32, key: u64, compact := false) {
 	s := primer.scheme()
+	pad: f32 = compact ? 12 : 16
 	ui.sized(gtx, {min = {width, 0}, max = {width, ui.INF}}, key = key)
 	sp := new(Stat_Paint, gtx.allocator)
 	sp^ = {ui.claim_id(gtx, key + 0x57a7), fmt.tprintf("stat:%s", label), s[.Bg_Color_Default], s[.Border_Color_Default]}
-	b := ui.box_open(gtx, {padding = ui.pad_all(compact ? 12 : 16), paint = paint_stat, user = sp})
+	b := ui.box_open(gtx, {padding = ui.pad_all(pad), paint = paint_stat, user = sp})
 	defer ui.close(&b)
 	ui.column(gtx, gap = 4, align = .Fill)
 	primer.text(gtx, label, .Small, .Medium, color = s[.Fg_Color_Muted])
-	primer.heading(gtx, value, 3, .Large)
+	{
+		line := primer.heading_style(.Large).line_height
+		ui.sized(gtx, {min = {0, line}, max = {ui.INF, line}}, key = 2)
+		primer.heading(gtx, value, 3, figure_size(gtx, value, width - 2 * pad))
+	}
 	if !compact {
 		primer.truncate(gtx, note, title = note, max_width = width - 32, size = .Small, color = s[.Fg_Color_Muted], key = 1)
 	}
+}
+
+// figure_size is the largest heading a figure fits width at, on one line.
+figure_size :: proc(gtx: ^ui.Ctx, value: string, width: f32) -> primer.Heading_Variant {
+	for v in ([2]primer.Heading_Variant{.Large, .Medium}) {
+		st := primer.heading_style(v)
+		if design.shape_style(gtx, value, st, primer.font_for(gtx, st.weight)).width <= width {
+			return v
+		}
+	}
+	return .Small
 }
 
 // Stat_Paint is a figure's box, drawn once its size is known, and named
