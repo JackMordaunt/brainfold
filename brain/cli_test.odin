@@ -743,8 +743,10 @@ import_proposes_claude_memories_and_lists :: proc(t: ^testing.T) {
 	testing.expect_value(t, path.mkdirs(mem), nil)
 	testing.expect_value(t, path.write(path.join(mem, "MEMORY.md"), "- [Canonical remote](canonical-remote.md) — the hook\n- [Loose](nowhere.md) — just the hook\nnot a memory\n"), nil)
 	testing.expect_value(t, path.write(path.join(mem, "canonical-remote.md"), "---\nname: canonical-remote\ndescription: d\nmetadata:\n  type: user\n---\n\nUse the forge\nfor remotes.\n"), nil)
-	// A transcript of the project names it.
-	testing.expect_value(t, path.write(path.join(path.dir(mem), "s.jsonl"), strings.concatenate({`{"type":"user","cwd":"`, repo, `"}`, "\n"})), nil)
+	// A transcript of the project names it. A transcript line is JSON, so a
+	// Windows path's backslashes are escaped, as in recall_test's Claude
+	// fixture; spliced in raw, `\U` is a bad escape and the parser keeps `C:`.
+	testing.expect_value(t, path.write(path.join(path.dir(mem), "s.jsonl"), strings.concatenate({`{"type":"user","cwd":`, json_quote(repo), `}`, "\n"})), nil)
 	o, _, code := exec(f.cli, "import", "claude")
 	testing.expect_value(t, code, 0)
 	testing.expect(t, strings.contains(o, "2 proposal(s) from 2 memories"), o)
