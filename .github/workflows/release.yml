@@ -264,6 +264,15 @@ jobs:
         run: |
           brew install --quiet sdl3
           echo "LINKFLAGS=-L$(brew --prefix)/lib" >> "$GITHUB_ENV"
+      # A face to draw the smoke's text with, where jm:ui's default font
+      # is: the desk looks for Noto at Arch's path, not Ubuntu's, and falls
+      # back to Liberation; with neither, the page renders without text.
+      - name: fonts (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends fonts-liberation
+          sudo mkdir -p /usr/share/fonts/liberation
+          sudo ln -sf /usr/share/fonts/truetype/liberation/*.ttf /usr/share/fonts/liberation/
       # SDL3 from source where no package serves: on Linux, console-only,
       # since nothing here opens a window and Ubuntu has no package; on the
       # Intel macOS build, the x86_64 library Homebrew on arm64 cannot give.
@@ -381,7 +390,7 @@ jobs:
             build/desk/${{ matrix.asset }}/desk${{ matrix.exe }} -brain "$brain" -page Bullets \
             -png build/${{ matrix.asset }}.png -dump > build/dump.txt
           grep -q 'fixture tool' build/dump.txt || { echo "::error::the Bullets page never showed the fixture vault"; cat build/dump.txt; exit 1; }
-          head -c 8 build/${{ matrix.asset }}.png | od -An -tx1 | grep -q '89 50 4e 47' || { echo "::error::no PNG written"; exit 1; }
+          [ "$(head -c 4 build/${{ matrix.asset }}.png | od -An -tx1 | tr -d ' \n')" = 89504e47 ] || { echo "::error::no PNG written"; exit 1; }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.asset }}
