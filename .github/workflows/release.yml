@@ -335,7 +335,9 @@ jobs:
           ver=$(value accesskit_ver) sha=$(value accesskit_sha)
           zip="$RUNNER_TEMP/accesskit.zip"
           curl -sSL --max-time 600 -o "$zip" "https://github.com/AccessKit/accesskit-c/releases/download/$ver/accesskit-c-$ver.zip"
-          if command -v sha256sum >/dev/null; then sum=$(sha256sum "$zip" | cut -d' ' -f1); else sum=$(shasum -a 256 "$zip" | cut -d' ' -f1); fi
+          # From stdin: Git Bash's sha256sum escapes a hash whose file name
+          # holds a backslash, as RUNNER_TEMP does on Windows.
+          if command -v sha256sum >/dev/null; then sum=$(sha256sum < "$zip" | cut -d' ' -f1); else sum=$(shasum -a 256 < "$zip" | cut -d' ' -f1); fi
           [ "$sum" = "$sha" ] || { echo "::error::accesskit-c $ver has sha256 $sum, expected $sha"; exit 1; }
           member="accesskit-c-$ver/lib/${{ matrix.accesskit }}/*"
           if command -v unzip >/dev/null; then unzip -q "$zip" "$member" -d "$RUNNER_TEMP/accesskit"; else 7z x -y -o"$RUNNER_TEMP/accesskit" "$zip" "$member" >/dev/null; fi
