@@ -82,6 +82,9 @@ main :: proc() {
 				fmt.eprintfln("no page %s", name)
 				os.exit(2)
 			}
+			// The page asked for is the page shown: Setup's offer to a
+			// machine with no agent connected would replace it.
+			m.setup_offered = true
 		case "-theme":
 			name := value(args, &i)
 			found := false
