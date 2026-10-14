@@ -46,7 +46,7 @@ editor_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	f := &e.frame
 	ui.row(gtx, gap = 8, align = .Center)
 	if e.drafting {
-		if primer.button(gtx, "Write bullet", .Primary, leading = .Check, loading = waiting_on(m, .Write_Bullet), inactive = !f.ok) && f.ok {
+		if fix_button(gtx, "Write", "Write the bullet into the vault.", .Primary, .Check, loading = waiting_on(m, .Write_Bullet), inactive = !f.ok) && f.ok {
 			send(gtx, m, .Write_Bullet, {strings.trim_space(ui.text_string(&e.handle))}, f.line, f.to)
 		}
 		if primer.button(gtx, "Discard", .Default, inactive = f.busy) && !f.busy {
@@ -160,7 +160,7 @@ changed :: proc(e: ^Editor, b: shapes.Bullet) -> bool {
 bullets_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	st := ui.stack_open(gtx)
 	defer ui.close(&st)
-	if primer.button(gtx, "New bullet", .Primary, .Medium, leading = .Plus) {
+	if primer.button(gtx, "New", .Primary, .Medium, leading = .Plus) {
 		draft(m)
 	}
 	primer.tooltip(gtx, "Write a bullet by hand: a handle, the names it answers to, one fact, where it came from and when.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)

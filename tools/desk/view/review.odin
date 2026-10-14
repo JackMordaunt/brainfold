@@ -99,15 +99,12 @@ proposal_review :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal) {
 			color = s[.Fg_Color_Muted],
 		)
 		ui.row(gtx, align = .Center)
-		if primer.button(
-			gtx,
-			"Read the conversation",
-			.Default,
-			.Small,
-			leading = .Comment_Discussion,
-		) {
+		st := ui.stack_open(gtx)
+		defer ui.close(&st)
+		if primer.button(gtx, "Read", .Default, .Small, leading = .Comment_Discussion) {
 			read_conversation(m, p.handle, o.turn)
 		}
+		primer.tooltip(gtx, "Read the conversation that proposed it, in Recall.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 	}
 }
 
@@ -139,7 +136,7 @@ similar_card :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal, b: shapes.Near
 	st := ui.stack_open(gtx, key = 6)
 	if primer.button(
 		   gtx,
-		   "Merge into this",
+		   "Merge",
 		   .Default,
 		   .Small,
 		   leading = .Git_Merge,

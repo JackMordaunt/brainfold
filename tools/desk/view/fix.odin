@@ -50,7 +50,7 @@ fix_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	case .Stale:
 		h := d.stale[i].handle
 		busy := waiting_on(m, .Touch_Bullet, h)
-		if fix_button(gtx, "Still true", "Date it today: you checked, and it still holds.", .Primary, .Check, loading = busy) && !busy {
+		if fix_button(gtx, "Confirm", "Date it today: you checked, and it still holds.", .Primary, .Check, loading = busy) && !busy {
 			send(gtx, m, .Touch_Bullet, {h})
 		}
 		edit_fix(gtx, m, h, "Open it in Bullets to rewrite what no longer holds.")
@@ -62,7 +62,7 @@ fix_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		if fix_button(gtx, "Unlink", fmt.tprintf("Make [[%s]] plain text in %s: the words stay, the link goes.", x.target, x.file), .Primary, .Unlink, loading = busy) && !busy {
 			send(gtx, m, .Unlink, {x.target}, x.file, fmt.tprint(x.line))
 		}
-		if fix_button(gtx, "Write the bullet", "Write the bullet the link names, so it leads somewhere.", .Default, .Plus) {
+		if fix_button(gtx, "Write", "Write the bullet the link names, so it leads somewhere.", .Default, .Plus) {
 			// The link resolves to a bullet whose handle is its target with
 			// spaces for dashes, as doctor matches them.
 			named, _ := strings.replace_all(x.target, "-", " ", context.temp_allocator)
@@ -72,7 +72,7 @@ fix_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		edit_fix(gtx, m, d.oversized[i].handle, "Open it in Bullets to cut it to one fact; write the rest as bullets of their own.", .Primary)
 	case .Orphans:
 		file := d.orphan_artifacts[i].file
-		if fix_button(gtx, "Write a bullet for it", "Write a bullet whose source is this note, so a find leads an agent to it.", .Primary, .Plus) {
+		if fix_button(gtx, "Write", "Write a bullet whose source is this note, so a find leads an agent to it.", .Primary, .Plus) {
 			draft(m, source = file)
 		}
 	case .Promote:
@@ -191,13 +191,13 @@ inbox_copy :: proc(gtx: ^ui.Ctx, m: ^Model, handle: string) -> int {
 		primer.text(gtx, fmt.tprintf("the inbox · a proposal, not yet reviewed · %s", p.date), .Small, color = s[.Fg_Color_Muted])
 		primer.text(gtx, p.fact)
 		ui.row(gtx, gap = 8, align = .Center)
-		if fix_button(gtx, "Open in Inbox", "Review it beside the other proposals: approve it to another file, or edit it first.", .Default, .Inbox, key = 1) {
+		if fix_button(gtx, "Review", "Review it beside the other proposals: approve it to another file, or edit it first.", .Default, .Inbox, key = 1) {
 			go(m, .Inbox)
 			choose(&m.proposal, p.handle)
 		}
 		ui.fill_space(gtx)
 		busy := waiting_on(m, .Drop, p.handle)
-		if fix_button(gtx, "Drop the proposal", "The vault has this handle already: drop the proposal. It is kept in AI/DROPPED.md and not proposed again.", .Danger, .Trash, loading = busy, key = 2) && !busy {
+		if fix_button(gtx, "Drop", "The vault has this handle already: drop the proposal. It is kept in AI/DROPPED.md and not proposed again.", .Danger, .Trash, loading = busy, key = 2) && !busy {
 			send(gtx, m, .Drop, {p.handle})
 		}
 		return 1

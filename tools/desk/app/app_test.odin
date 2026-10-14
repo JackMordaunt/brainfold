@@ -346,7 +346,7 @@ doctor_runs_when_asked_not_on_the_poll :: proc(t: ^testing.T) {
 	testing.expect(t, shows(&r, "Report from"))
 
 	answer(&r.f, "doctor --json", `{"queries_logged":6,"thin_aliases":[{"file":"AI/MEMORY.md","handle":"a"}]}`)
-	testing.expect(t, ui.probe_click(&r.p, "Run doctor"))
+	testing.expect(t, ui.probe_click(&r.p, "Check"))
 	testing.expect(t, settle(&r))
 	testing.expect_value(t, times_asked(&r.f, "doctor --json"), 2)
 	testing.expect(t, shows(&r, "Since the last run: 1 fewer bullet with thin aliases"), "the summary")
@@ -387,12 +387,12 @@ a_bullet_written_runs_the_cli :: proc(t: ^testing.T) {
 	answer(&r.f, strings.concatenate({"--json bullet write ", line, " --to MEMORY"}, context.temp_allocator), `{"status":"written","handle":"orbital period","file":"AI/MEMORY.md","line":9,"errors":[],"warnings":[]}`)
 	r.m.page = .Bullets
 	testing.expect(t, settle(&r))
-	testing.expect(t, ui.probe_click(&r.p, "New bullet"))
+	testing.expect(t, ui.probe_click(&r.p, "New"))
 	ui.text_set(&r.m.editor.handle, "orbital period")
 	ui.text_set(&r.m.editor.fact, "the moon goes round in 27 days")
 	ui.text_set(&r.m.editor.date, "2026-01-03")
 	testing.expect(t, settle(&r))
-	testing.expect(t, ui.probe_click(&r.p, "Write bullet"))
+	testing.expect(t, ui.probe_click(&r.p, "Write"))
 	testing.expect(t, settle(&r))
 	testing.expect_value(t, times_asked(&r.f, strings.concatenate({"--json bullet write ", line, " --to MEMORY"}, context.temp_allocator)), 1)
 	testing.expect(t, shows(&r, "Written orbital period at AI/MEMORY.md:9"), "the toast")
@@ -400,7 +400,7 @@ a_bullet_written_runs_the_cli :: proc(t: ^testing.T) {
 	testing.expect_value(t, times_asked(&r.f, "doctor --json"), 0) // no report shown, none made
 }
 
-// A stale bullet's "Still true" runs brain bullet touch, then doctor
+// A stale bullet's "Confirm" runs brain bullet touch, then doctor
 // again, so the bullet leaves the stale list.
 @(test)
 a_stale_bullet_touched_reruns_doctor :: proc(t: ^testing.T) {
@@ -412,7 +412,7 @@ a_stale_bullet_touched_reruns_doctor :: proc(t: ^testing.T) {
 	r.m.page = .Doctor
 	testing.expect(t, settle(&r))
 	answer(&r.f, "doctor --json", `{"queries_logged":5,"stale":[]}`)
-	testing.expect(t, ui.probe_click(&r.p, "Still true"))
+	testing.expect(t, ui.probe_click(&r.p, "Confirm"))
 	testing.expect(t, settle(&r))
 	testing.expect_value(t, times_asked(&r.f, "--json bullet touch old fact"), 1)
 	testing.expect_value(t, times_asked(&r.f, "doctor --json"), 2)

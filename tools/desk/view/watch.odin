@@ -275,13 +275,23 @@ miss_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		return
 	}
 	ui.row(gtx, gap = 8, align = .Center)
-	if primer.button(gtx, "Write a bullet", .Primary, .Small, leading = .Plus) {
-		draft(m, query, query)
+	{
+		st := ui.stack_open(gtx)
+		defer ui.close(&st)
+		if primer.button(gtx, "Write", .Primary, .Small, leading = .Plus) {
+			draft(m, query, query)
+		}
+		primer.tooltip(gtx, "Write a bullet that answers it, named after the query.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 	}
-	if primer.button(gtx, "Open in Recall", .Default, .Small, leading = .Comment_Discussion) {
-		go(m, .Recall)
-		ui.text_set(&m.search, query)
-		m.turn.len = 0
+	{
+		st := ui.stack_open(gtx)
+		defer ui.close(&st)
+		if primer.button(gtx, "Search", .Default, .Small, leading = .Comment_Discussion) {
+			go(m, .Recall)
+			ui.text_set(&m.search, query)
+			m.turn.len = 0
+		}
+		primer.tooltip(gtx, "Search Recall for what your agents said about it.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 	}
 }
 

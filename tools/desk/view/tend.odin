@@ -388,7 +388,7 @@ doctor_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	}
 	button := ui.stack_open(gtx)
 	defer ui.close(&button)
-	if primer.button(gtx, "Run doctor", .Primary, .Medium, leading = .Sync, loading = running) && !running {
+	if primer.button(gtx, "Check", .Primary, .Medium, leading = .Sync, loading = running) && !running {
 		send(gtx, m, .Doctor)
 	}
 	primer.tooltip(gtx, "Check the vault again: what is stale, thin, oversized, orphaned or no longer verifies. It takes a second or two; the toast says what changed since the last check.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
@@ -716,7 +716,7 @@ vault_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	{
 		st := ui.stack_open(gtx)
 		defer ui.close(&st)
-		if primer.button(gtx, "Rebuild index", .Default, .Medium, leading = .Database, loading = reindexing) && !reindexing {
+		if primer.button(gtx, "Reindex", .Default, .Medium, leading = .Database, loading = reindexing) && !reindexing {
 			send(gtx, m, .Reindex)
 		}
 		primer.tooltip(gtx, "Read every note again and rebuild what finds search. It happens on its own when a note changes; use it if answers look out of date.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)

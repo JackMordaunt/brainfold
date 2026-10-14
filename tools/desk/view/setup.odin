@@ -398,7 +398,7 @@ setup_sync :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result) {
 @(private = "file")
 sync_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	ui.row(gtx, align = .Center)
-	if primer.button(gtx, "Set up sync in Vault", .Default, leading = .Sync) {
+	if fix_button(gtx, "Sync", "Set up sync on the Vault page: name where the vault is kept, and every machine that uses it stays the same.", .Default, .Sync) {
 		go(m, .Vault)
 	}
 }

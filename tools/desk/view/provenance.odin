@@ -126,9 +126,12 @@ origin :: proc(gtx: ^ui.Ctx, m: ^Model, p: ^shapes.Bullet_Show_Result, b: shapes
 	when_ := len(pr.ts) >= 16 ? fmt.tprintf("%s %s", pr.ts[:10], pr.ts[11:16]) : pr.ts
 	primer.text(gtx, fmt.tprintf("Proposed by %s, %s", pr.agent != "" ? pr.agent : "an agent", when_), .Small, color = s[.Fg_Color_Muted])
 	ui.row(gtx, align = .Center)
-	if primer.button(gtx, "Read the conversation", .Default, .Small, leading = .Comment_Discussion) {
+	st := ui.stack_open(gtx)
+	defer ui.close(&st)
+	if primer.button(gtx, "Read", .Default, .Small, leading = .Comment_Discussion) {
 		read_conversation(m, b.handle, pr.turn)
 	}
+	primer.tooltip(gtx, "Read the conversation that proposed it, in Recall.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 }
 
 // read_conversation opens Recall on the conversation around turn, kept
