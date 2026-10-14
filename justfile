@@ -87,6 +87,7 @@ check: deps
 # child inherits another child's pipe and its parent never reads EOF.
 test: build test-installer
     mkdir -p build/test
+    {{odin}} test msg {{uiflags}} -out:build/test/msg{{exe}}
     {{odin}} test brain {{san}} {{flags}} -define:ODIN_TEST_THREADS=1 -out:build/test/brain{{exe}}
     {{odin}} test term {{san}} {{uiflags}} -out:build/test/term{{exe}}
     @for f in bin/hooks/*; do bash -n "$f" && echo "ok $f"; done
@@ -270,6 +271,7 @@ desk-test: deps
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p build/test
+    {{odin}} test msg {{uiflags}} -out:build/test/msg{{exe}}
     for p in cli view app; do
       {{odin}} test tools/desk/$p {{san}} {{uiflags}} -out:build/test/desk-$p{{exe}}
     done
