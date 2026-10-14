@@ -32,7 +32,7 @@ bullet_show :: proc(cli: ^Cli, handle, place: string) -> int {
 	}
 	defer sqlite3.close(&db)
 	if scalar_int(db, "select count(*) from bullets where file=? and line=? and handle=?", file, i64(at), handle) == 0 {
-		return fail(cli, fmt.aprintf("%s:%d is no longer **%s**; reindex and try again", file, at, handle))
+		return fail(cli, phrase(cli, .Show_Moved, file, fmt.tprint(at), handle))
 	}
 	history := bullet_history(cli, handle)
 	proposed := find_origin(cli, handle)

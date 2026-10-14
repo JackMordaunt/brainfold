@@ -24,11 +24,11 @@ cmd_alias :: proc(cli: ^Cli, args: []string) -> int {
 		verb, rest = rest[0], rest[1:]
 	}
 	if len(rest) == 0 || (verb != "" && len(rest) < 2) {
-		return fail(cli, "usage: brain alias [add|remove] <handle> [<term>...]")
+		return fail(cli, phrase(cli, .Usage_Alias))
 	}
 	handle, terms := rest[0], rest[1:]
 	if verb == "" && len(terms) > 0 {
-		return fail(cli, "usage: brain alias [add|remove] <handle> [<term>...]")
+		return fail(cli, phrase(cli, .Usage_Alias))
 	}
 	// Only a name being added is held to the form: one already there, that
 	// an older hand wrote with a parenthesis in it, can still be taken out.

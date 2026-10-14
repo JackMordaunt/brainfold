@@ -19,8 +19,10 @@ import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
 
+import "jm:i18n"
 import "jm:path"
 
+import "../msg"
 import "../term"
 
 // The checkout `just build` was run from, baked in so a development binary
@@ -64,6 +66,7 @@ Cli :: struct {
 	indexed:      struct {
 		bullets, links, files: int,
 	}, // what the last reindex counted
+	strings:      msg.Strings, // the catalog in the locale this run speaks
 }
 
 // new_cli resolves every path the subcommands share. env overrides the
@@ -93,6 +96,8 @@ new_cli :: proc(env: map[string]string = nil, tty := false) -> ^Cli {
 
 	cli.tool = find_tool(cli)
 	cli.vault = find_vault(cli)
+	system := [3]string{getenv(cli, "LC_ALL"), getenv(cli, "LC_MESSAGES"), getenv(cli, "LANG")}
+	msg.init(&cli.strings, msg.startup_locale(cli.conf_dir, system[:]))
 	return cli
 }
 
@@ -174,10 +179,10 @@ find_vault :: proc(cli: ^Cli) -> string {
 // need_vault fails when no vault is known or the recorded one is gone.
 need_vault :: proc(cli: ^Cli) -> string {
 	if cli.vault == "" {
-		return "no vault yet: run 'brain install [<path-to-vault>]', or set BRAIN_VAULT"
+		return phrase(cli, .No_Vault)
 	}
 	if !os.is_dir(cli.vault) {
-		return fmt.aprintf("vault recorded but missing: %s", cli.vault)
+		return phrase(cli, .Vault_Missing, cli.vault)
 	}
 	return ""
 }
@@ -195,7 +200,7 @@ run :: proc(cli: ^Cli, raw_args: []string) -> int {
 		} else if strings.has_prefix(a, "--color=") {
 			mode, ok := term.parse_mode(a[len("--color="):])
 			if !ok {
-				return fail(cli, fmt.aprintf("--color takes auto, always or never, not %q", a[len("--color="):]))
+				return fail(cli, phrase(cli, .Bad_Color, fmt.tprintf("%q", a[len("--color="):])))
 			}
 			cli.style = detect_style(cli, mode)
 		} else {
@@ -281,7 +286,7 @@ run :: proc(cli: ^Cli, raw_args: []string) -> int {
 		print_usage(cli)
 		return 0
 	case:
-		return fail(cli, fmt.aprintf("unknown command: %s (try 'brain help')", cmd))
+		return fail(cli, phrase(cli, .Unknown_Command, cmd))
 	}
 }
 
@@ -404,6 +409,19 @@ cmd_locate :: proc(cli: ^Cli, args: []string) -> int {
 
 out :: proc(cli: ^Cli, s: string) {
 	strings.write_string(&cli.out, s)
+}
+
+// phrase is key for a person. --json keeps the English, which is the
+// protocol the desk and agents read.
+phrase :: proc(cli: ^Cli, key: msg.Msg, args: ..i18n.Arg) -> string {
+	table := cli.json ? &cli.strings.base : &cli.strings.active
+	return i18n.format(table, key, ..args, allocator = context.temp_allocator)
+}
+
+// said writes phrase and a newline.
+said :: proc(cli: ^Cli, key: msg.Msg, args: ..i18n.Arg) {
+	out(cli, phrase(cli, key, ..args))
+	strings.write_byte(&cli.out, '\n')
 }
 
 outf :: proc(cli: ^Cli, format: string, args: ..any) {

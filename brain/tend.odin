@@ -44,7 +44,7 @@ cmd_tend :: proc(cli: ^Cli, args: []string) -> int {
 		case "--dry-run":
 			dry = true
 		case:
-			return fail(cli, "usage: brain tend [--quick] [--dry-run]")
+			return fail(cli, phrase(cli, .Usage_Tend))
 		}
 	}
 	if err := ensure_db(cli); err != "" {
@@ -67,15 +67,15 @@ cmd_tend :: proc(cli: ^Cli, args: []string) -> int {
 		return 0
 	}
 	if dry {
-		outf(cli, "tend would add %d aliases and propose %d hygiene items (%d verified bullets to date)\n", r.aliases, r.proposed, r.dated)
+		said(cli, .Tend_Would, r.aliases, r.proposed, r.dated)
 		return 0
 	}
-	outf(cli, "tend: added %d aliases, proposed %d hygiene items", r.aliases, r.proposed)
+	out(cli, phrase(cli, .Tend_Did, r.aliases, r.proposed))
 	if r.lessons > 0 {
-		outf(cli, ", %d lessons", r.lessons)
+		out(cli, phrase(cli, .Tend_Lessons, r.lessons))
 	}
 	if r.proposed > 0 || r.lessons > 0 {
-		out(cli, "; brain inbox lists them")
+		out(cli, phrase(cli, .Tend_Inbox))
 	}
 	out(cli, "\n")
 	return 0
@@ -124,9 +124,8 @@ tend :: proc(cli: ^Cli, quick, dry: bool) -> (r: Tend_Result, err: string) {
 		if !ok {
 			continue
 		}
-		mark := strings.builder_len(cli.out)
-		inbox_write(cli, line, b)
-		if strings.has_prefix(strings.to_string(cli.out)[mark:], "proposed") {
+		_, wrote := inbox_write(cli, line, b)
+		if wrote {
 			r.proposed += 1
 		}
 	}
@@ -136,8 +135,8 @@ tend :: proc(cli: ^Cli, quick, dry: bool) -> (r: Tend_Result, err: string) {
 			moments := lesson_moments(rdb, 7, "", "")
 			sqlite3.close(&rdb)
 			mark := strings.builder_len(cli.out)
-			lessons_propose(cli, moments)
-			r.lessons = strings.count(strings.to_string(cli.out)[mark:], "proposed #")
+			_, n := lessons_propose(cli, moments)
+			r.lessons = n
 			resize(&cli.out.buf, mark)
 		}
 	}

@@ -82,10 +82,10 @@ cmd_sync :: proc(cli: ^Cli, args: []string) -> int {
 			return fail(cli, usage)
 		}
 		if err := path.mkdirs(cli.conf_dir); err != nil {
-			return fail(cli, strings.concatenate({"cannot create ", cli.conf_dir}))
+			return fail(cli, phrase(cli, .Cannot_Create_Dir, cli.conf_dir))
 		}
 		if err := path.write(path.join(cli.conf_dir, SYNC_CONF), strings.concatenate({args[0], "\n"})); err != nil {
-			return fail(cli, "cannot write the sync setting")
+			return fail(cli, phrase(cli, .Sync_Setting_Fail))
 		}
 		if cli.json {
 			w := jw_make()
@@ -94,9 +94,9 @@ cmd_sync :: proc(cli: ^Cli, args: []string) -> int {
 			jw_end_obj(&w)
 			jw_flush(cli, &w)
 		} else if args[0] == "on" {
-			out(cli, "sync on: this machine sends what changes and receives what others wrote\n")
+			said(cli, .Sync_On)
 		} else {
-			out(cli, "sync off: the vault stays on this machine until brain sync on\n")
+			said(cli, .Sync_Off)
 		}
 		return 0
 	case "status":
@@ -439,43 +439,43 @@ sync_say :: proc(cli: ^Cli, r: Sync_Report) -> int {
 	}
 	switch {
 	case r.off:
-		out(cli, "sync is off for this machine; brain sync on turns it on\n")
+		said(cli, .Sync_Is_Off)
 		return 0
 	case r.no_repo:
-		out(cli, "the vault is not versioned yet; brain install sets that up\n")
+		said(cli, .Not_Versioned)
 		return 0
 	}
 	if r.wrote > 0 {
-		outf(cli, "wrote down %d %s\n", r.wrote, r.wrote == 1 ? "change" : "changes")
+		said(cli, .Wrote_Down, r.wrote)
 	}
 	if r.waiting != "" {
-		outf(cli, "changes waiting: %s\n", r.waiting)
+		said(cli, .Changes_Waiting_Line, r.waiting)
 	}
 	if !r.connected {
-		out(cli, "not connected to another machine; brain sync connect <url>, or brain sync connect github\n")
+		said(cli, .Not_Connected)
 		return r.waiting != "" ? 1 : 0
 	}
 	if r.conflict != "" {
-		outf(cli, "both sides changed %s; this machine kept its own and nothing was lost. Open the file, keep what you want, then brain sync\n", r.conflict)
+		said(cli, .Conflict, r.conflict)
 		return 1
 	}
 	if r.offline {
-		out(cli, "offline; what changed here is safe and goes when the connection is back\n")
+		said(cli, .Offline)
 		return 0
 	}
 	if r.err != "" {
-		outf(cli, "the other machines' changes could not be taken in, and nothing was sent: %s\n", r.err)
+		said(cli, .Take_In_Failed, r.err)
 		return 1
 	}
 	switch {
 	case r.sent > 0 && r.received > 0:
-		outf(cli, "sent %d, received %d\n", r.sent, r.received)
+		said(cli, .Sent_Received, r.sent, r.received)
 	case r.sent > 0:
-		outf(cli, "sent %d\n", r.sent)
+		said(cli, .Sent_Only, r.sent)
 	case r.received > 0:
-		outf(cli, "received %d\n", r.received)
+		said(cli, .Received_Only, r.received)
 	case:
-		out(cli, "up to date\n")
+		said(cli, .Up_To_Date)
 	}
 	return r.waiting != "" ? 1 : 0
 }
@@ -504,17 +504,17 @@ sync_status :: proc(cli: ^Cli) -> int {
 		jw_flush(cli, &w)
 		return 0
 	}
-	outf(cli, "sync %s\n", on ? "on" : "off")
+	said(cli, .Sync_State, on ? "on" : "off")
 	if remote == "" {
-		out(cli, "not connected to another machine\n")
+		said(cli, .Not_Connected_Short)
 	} else {
-		outf(cli, "connected: %s\n", remote)
+		said(cli, .Connected_Url, remote)
 	}
 	if last != "" {
-		outf(cli, "last: %s\n", last)
+		said(cli, .Last_Line, last)
 	}
 	if changed > 0 {
-		outf(cli, "%d %s waiting to be written down\n", changed, changed == 1 ? "change" : "changes")
+		said(cli, .Waiting_Write, changed)
 	}
 	return 0
 }
@@ -526,7 +526,7 @@ sync_connect :: proc(cli: ^Cli, where_: string) -> int {
 	if !versioned {
 		made, err := git.init(cli.vault)
 		if err != nil {
-			return fail(cli, "the vault could not be versioned")
+			return fail(cli, phrase(cli, .Could_Not_Version))
 		}
 		repo = made
 	}
@@ -534,14 +534,14 @@ sync_connect :: proc(cli: ^Cli, where_: string) -> int {
 	url := where_
 	if where_ == "github" {
 		if _, found := sh.which("gh"); !found {
-			return fail(cli, "connect github needs the gh command signed in; or give a URL: brain sync connect <url>")
+			return fail(cli, phrase(cli, .Connect_Github))
 		}
 		// gh makes the repository and prints its address; the vault is
 		// pointed at it here, so gh never has to drive git.
 		name := path.base(cli.vault)
 		r := sh.exec({"gh", "repo", "create", name, "--private"}, {dir = cli.vault, timeout = 30 * time.Second})
 		if !r.ok {
-			return fail(cli, strings.concatenate({"github did not create the repository: ", strings.trim_space(sh.error(r))}))
+			return fail(cli, phrase(cli, .Github_Failed, strings.trim_space(sh.error(r))))
 		}
 		url = strings.trim_space(r.stdout)
 		if i := strings.last_index_byte(url, '\n'); i >= 0 {
@@ -554,7 +554,7 @@ sync_connect :: proc(cli: ^Cli, where_: string) -> int {
 	if remote_url(repo, "origin") != "" {
 		git.remote_set_url(repo, "origin", url)
 	} else if err := git.remote_add(repo, "origin", url); err != nil {
-		return fail(cli, strings.concatenate({"could not connect: ", fault_text(err)}))
+		return fail(cli, phrase(cli, .Could_Not_Connect, fault_text(err)))
 	}
 	// A vault that is still the starter adopts what is already there: the
 	// second machine's first connect should end with the first machine's
@@ -579,7 +579,7 @@ sync_connect :: proc(cli: ^Cli, where_: string) -> int {
 	}
 	rep := vault_sync(cli, .Full, force = true)
 	if !cli.json {
-		outf(cli, "connected: %s\n", url)
+		said(cli, .Connected_Url, url)
 	}
 	return sync_say(cli, rep)
 }

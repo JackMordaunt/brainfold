@@ -81,13 +81,13 @@ cmd_secrets :: proc(cli: ^Cli, args: []string) -> int {
 		out(cli, r.stdout)
 		errf(cli, "%s", r.stderr)
 		if r.code == 0 {
-			outf(cli, "brain secrets: clean (gitleaks, %s)\n", mode)
+			said(cli, .Secrets_Clean, mode)
 		}
 		return r.code
 	}
 
-	errf(cli, "brain secrets: gitleaks not found — falling back to six built-in patterns.\n")
-	errf(cli, "  install it for the full ruleset: pacman -S gitleaks / brew install gitleaks / scoop install gitleaks\n")
+	errf(cli, "%s\n", phrase(cli, .Secrets_Fallback))
+	errf(cli, "  %s\n", phrase(cli, .Secrets_Install))
 	hits := fallback_hits(patch)
 	if cli.json {
 		w := jw_make()
@@ -109,7 +109,7 @@ cmd_secrets :: proc(cli: ^Cli, args: []string) -> int {
 		return len(hits) == 0 ? 0 : 1
 	}
 	if len(hits) > 0 {
-		errf(cli, "brain secrets: possible secret in the change:\n")
+		errf(cli, "%s\n", phrase(cli, .Secrets_Found))
 		for h, i in hits {
 			if i == 20 {
 				break
@@ -118,7 +118,7 @@ cmd_secrets :: proc(cli: ^Cli, args: []string) -> int {
 		}
 		return 1
 	}
-	outf(cli, "brain secrets: clean (built-in patterns, %s)\n", mode)
+	said(cli, .Secrets_Clean_Builtin, mode)
 	return 0
 }
 

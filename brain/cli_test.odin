@@ -53,6 +53,9 @@ fixture_cli :: proc(f: Fixture) -> ^Cli {
 	env["CODEX_SANDBOX_NETWORK_DISABLED"] = ""
 	env["CLAUDE_CODE_SESSION_ID"] = ""
 	env["BRAIN_TOOL"] = ""
+	env["LC_ALL"] = "C"
+	env["LC_MESSAGES"] = "C"
+	env["LANG"] = "C"
 	return new_cli(env)
 }
 
@@ -906,6 +909,10 @@ help_is_styled_only_for_a_person :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
 	env := make(map[string]string)
 	env["TERM"] = "xterm-256color"
+	env["LC_ALL"] = "C"
+	env["LC_MESSAGES"] = "C"
+	env["LANG"] = "C"
+	env["XDG_CONFIG_HOME"] = "/tmp/brainfold-i18n-none"
 	for k in ([?]string{"NO_COLOR", "CLICOLOR_FORCE", "BRAIN_COLOR", "AI_AGENT", "CLAUDECODE", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED"}) {
 		env[k] = ""
 	}

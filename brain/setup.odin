@@ -25,7 +25,7 @@ Setup_Agent :: struct {
 
 cmd_setup :: proc(cli: ^Cli, args: []string) -> int {
 	if len(args) != 0 {
-		return fail(cli, "usage: brain setup")
+		return fail(cli, phrase(cli, .Usage_Setup))
 	}
 	vault := cli.vault
 	exists := vault != "" && os.is_dir(path.join(vault, "AI"))
@@ -79,11 +79,11 @@ cmd_setup :: proc(cli: ^Cli, args: []string) -> int {
 	if !cli.json {
 		switch {
 		case vault == "":
-			outf(cli, "vault:  none bound; brain install creates one\n")
+			said(cli, .Setup_Vault_None)
 		case !exists:
-			outf(cli, "vault:  %s is not a vault (no AI/)\n", vault)
+			said(cli, .Setup_Vault_Bad, vault)
 		case:
-			outf(cli, "vault:  %s, %d bullets\n", vault, bullets)
+			said(cli, .Setup_Vault, vault, bullets)
 		}
 		for a in agents {
 			state := "not on this machine"
@@ -93,9 +93,9 @@ cmd_setup :: proc(cli: ^Cli, args: []string) -> int {
 			}
 			outf(cli, "%-7s %s\n", a.name, state)
 		}
-		outf(cli, "lookups: %d so far\n", lookups)
-		outf(cli, "import:  %d new memories in %d sources\n", fresh, sources)
-		outf(cli, "sync:    %s\n", syncs ? "on" : "off")
+		said(cli, .Setup_Lookups, lookups)
+		said(cli, .Setup_Import, fresh, sources)
+		said(cli, .Setup_Sync, syncs ? "on" : "off")
 		return 0
 	}
 	w := jw_make()

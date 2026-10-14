@@ -38,7 +38,7 @@ cmd_lint :: proc(cli: ^Cli, args: []string) -> int {
 		case "--strict":
 			strict = true
 		case:
-			return fail(cli, "usage: brain lint [--staged] [--strict] [<file>...]")
+			return fail(cli, phrase(cli, .Usage_Lint))
 		}
 		rest = rest[1:]
 	}
@@ -168,7 +168,7 @@ cmd_lint :: proc(cli: ^Cli, args: []string) -> int {
 			outf(cli, "%s %s: **%s** %s\n", f.fail ? "FAIL" : "warn", f.file, f.handle, f.message)
 		}
 	}
-	outf(cli, "brain lint: %d failure(s), %d warning(s)\n", fails, warns)
+	said(cli, .Lint_Summary, fails, warns)
 	return fails == 0 ? 0 : 1
 }
 

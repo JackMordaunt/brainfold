@@ -63,7 +63,7 @@ cmd_timeline :: proc(cli: ^Cli, args: []string, week: bool) -> int {
 				rest = rest[1:]
 			}
 			if !ok || n <= 0 {
-				return fail(cli, "usage: --budget <tokens>")
+				return fail(cli, phrase(cli, .Usage_Budget))
 			}
 			budget = n * 4
 		case "--since":
@@ -78,16 +78,16 @@ cmd_timeline :: proc(cli: ^Cli, args: []string, week: bool) -> int {
 			days = n
 		case "--project":
 			if len(rest) == 0 {
-				return fail(cli, "usage: --project <name>")
+				return fail(cli, phrase(cli, .Usage_Project))
 			}
 			project = rest[0]
 			rest = rest[1:]
 		case:
 			if strings.has_prefix(arg, "-") {
-				return fail(cli, strings.concatenate({"unknown flag ", arg}))
+				return fail(cli, phrase(cli, .Unknown_Flag, arg))
 			}
 			if week || !is_iso_date(arg) {
-				return fail(cli, week ? "usage: brain week [--since <days>d] [--project <name>] [--no-git]" : "usage: brain day [YYYY-MM-DD] [--project <name>] [--no-git]")
+				return fail(cli, phrase(cli, week ? .Usage_Week : .Usage_Day))
 			}
 			date = arg
 		}
@@ -167,9 +167,9 @@ cmd_timeline :: proc(cli: ^Cli, args: []string, week: bool) -> int {
 	}
 	if len(tl) == 0 {
 		if from == to {
-			outf(cli, "nothing recorded on %s\n", from)
+			said(cli, .Day_None, from)
 		} else {
-			outf(cli, "nothing recorded between %s and %s\n", from, to)
+			said(cli, .Span_None, from, to)
 		}
 		return 1
 	}

@@ -43,7 +43,7 @@ cmd_pack :: proc(cli: ^Cli, args: []string) -> int {
 				rest = rest[1:]
 			}
 			if !ok || n <= 0 {
-				return fail(cli, "usage: brain pack --budget <tokens>")
+				return fail(cli, phrase(cli, .Usage_Pack_Budget))
 			}
 			budget = n * 4
 		case:
@@ -112,7 +112,7 @@ cmd_pack :: proc(cli: ^Cli, args: []string) -> int {
 	n := len(served)
 	log_query(db, strings.concatenate({"pack ", project}), served[:], caller_id(cli), session_id(cli), len(body))
 	if n == 0 {
-		errf(cli, "no bullets for: %s\n", project)
+		errf(cli, "%s\n", phrase(cli, .No_Bullets, project))
 		return 1
 	}
 	out(cli, body)

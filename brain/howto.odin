@@ -54,7 +54,7 @@ cmd_howto :: proc(cli: ^Cli, args: []string) -> int {
 		}
 	}
 	if len(terms) == 0 {
-		return fail(cli, "usage: brain howto <terms...> [--all] [--propose]")
+		return fail(cli, phrase(cli, .Usage_Howto))
 	}
 	if !recall_enabled(cli) {
 		return 1
@@ -113,7 +113,7 @@ howto_report_miss :: proc(cli: ^Cli, terms: []string) -> int {
 		jw_flush(cli, &w)
 		return 1
 	}
-	outf(cli, "no session ran commands about: %s\n", strings.join(terms, " "))
+	said(cli, .Howto_None, strings.join(terms, " "))
 	return 1
 }
 
@@ -271,7 +271,8 @@ howto_propose :: proc(cli: ^Cli, terms: []string, h: Howto) -> int {
 	if !cli.json {
 		outf(cli, "wrote %s\n", rel)
 	}
-	return propose_line(cli, line)
+	code, _ := propose_line(cli, line)
+	return code
 }
 
 jw_howto :: proc(w: ^Jw, h: Howto, with_commands: bool) {

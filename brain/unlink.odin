@@ -27,24 +27,24 @@ cmd_unlink :: proc(cli: ^Cli, args: []string) -> int {
 	}
 	// A vault-relative path, as doctor names it: nothing outside the vault.
 	if strings.has_prefix(file, "/") || strings.contains(file, "..") || strings.contains(file, ":") {
-		return fail(cli, fmt.aprintf("%s is not a file in the vault", file))
+		return fail(cli, phrase(cli, .File_Not_In_Vault, file))
 	}
 	full := path.join(cli.vault, file)
 	body, rok := read_text(full)
 	if !rok {
-		return fail(cli, fmt.aprintf("cannot read %s", file))
+		return fail(cli, phrase(cli, .Cannot_Read_File, file))
 	}
 	lines := strings.split_lines(body)
 	if at > len(lines) {
-		return fail(cli, fmt.aprintf("%s has no line %d; reindex and try again", file, at))
+		return fail(cli, phrase(cli, .Bullet_No_Line, file, fmt.tprint(at)))
 	}
 	line, n := unlink_line(lines[at - 1], target)
 	if n == 0 {
-		return fail(cli, fmt.aprintf("%s:%d has no [[%s]]; reindex and try again", file, at, target))
+		return fail(cli, phrase(cli, .No_Wikilink, file, fmt.tprint(at), target))
 	}
 	lines[at - 1] = line
 	if err := path.write(full, strings.join(lines, "\n")); err != nil {
-		return fail(cli, fmt.aprintf("cannot write %s: %v", file, err))
+		return fail(cli, phrase(cli, .Cannot_Write, file, fmt.tprintf("%v", err)))
 	}
 	if err := sync(cli, quiet = true); err != "" {
 		return fail(cli, err)
@@ -60,7 +60,7 @@ cmd_unlink :: proc(cli: ^Cli, args: []string) -> int {
 		jw_flush(cli, &w)
 		return 0
 	}
-	outf(cli, "unlinked [[%s]] at %s:%d\n", target, file, at)
+	said(cli, .Unlinked_Cli, target, file, fmt.tprint(at))
 	return 0
 }
 

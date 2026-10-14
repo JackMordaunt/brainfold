@@ -156,6 +156,34 @@ older_notes :: proc(db: sqlite3.Db) -> []Older_Note {
 	return out[:]
 }
 
+// doctor_title is a section's heading in the language in use. The key
+// stays English: it is the --json field.
+doctor_title :: proc(cli: ^Cli, s: Section, nq: int) -> string {
+	switch s.key {
+	case "stale":
+		return phrase(cli, .Doc_Stale, STALE_DAYS)
+	case "thin_aliases":
+		return phrase(cli, .Doc_Thin)
+	case "oversized":
+		return phrase(cli, .Doc_Over, MAXLEN)
+	case "duplicate_handles":
+		return phrase(cli, .Doc_Dupes)
+	case "dead_links":
+		return phrase(cli, .Doc_Links)
+	case "orphan_artifacts":
+		return phrase(cli, .Doc_Orphans)
+	case "promote":
+		return phrase(cli, .Doc_Promote, PROMOTE_QUERIES)
+	case "never_returned":
+		return phrase(cli, .Doc_Never, nq)
+	case "zero_hit":
+		return phrase(cli, .Doc_Zero)
+	case "failed_claims":
+		return phrase(cli, .Doc_Failed)
+	}
+	return s.title
+}
+
 cmd_doctor :: proc(cli: ^Cli, args: []string) -> int {
 	if err := ensure_db(cli); err != "" {
 		return fail(cli, err)
@@ -215,24 +243,24 @@ cmd_doctor :: proc(cli: ^Cli, args: []string) -> int {
 		return 0
 	}
 	for s, i in sections {
-		outf(cli, "%s== %s ==\n", i == 0 ? "" : "\n", s.title)
+		outf(cli, "%s== %s ==\n", i == 0 ? "" : "\n", doctor_title(cli, s, nq))
 		if s.has_arg {
 			print_box(cli, db, s.sql, s.arg)
 		} else {
 			print_box(cli, db, s.sql)
 		}
 		if s.key == "promote" && nq < 50 {
-			outf(cli, "\n== never returned by any query (prune candidates, from %d queries) ==\n", nq)
-			out(cli, "   too few queries logged to mean anything yet — this needs months of real use\n")
+			outf(cli, "\n== %s ==\n", phrase(cli, .Doc_Never, nq))
+			outf(cli, "   %s\n", phrase(cli, .Doc_Never_Few))
 		}
 	}
-	out(cli, "\n== older notes that name what a newer bullet names: an agent may quote them over the bullet; mark or retire them ==\n")
+	outf(cli, "\n== %s ==\n", phrase(cli, .Doc_Older))
 	for o in older {
-		outf(cli, "%s (%s): %d line(s) from :%d name **%s**\n", o.file, o.date, o.lines, o.first, strings.join(o.handles[:], "**, **"))
+		said(cli, .Doc_Older_Row, o.file, o.date, o.lines, fmt.tprint(o.first), strings.join(o.handles[:], "**, **"))
 	}
-	out(cli, "\n== suspect: served within ten turns before the person corrected the agent; the serve may have misled it ==\n")
+	outf(cli, "\n== %s ==\n", phrase(cli, .Doc_Suspect))
 	for x in suspect {
-		outf(cli, "%s **%s** served %s, then: %s\n", x.file, x.handle, x.served, x.user)
+		said(cli, .Doc_Suspect_Row, x.file, x.handle, x.served, x.user)
 	}
 	return 0
 }

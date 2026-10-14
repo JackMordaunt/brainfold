@@ -71,14 +71,14 @@ cmd_log :: proc(cli: ^Cli, args: []string) -> int {
 		jw_flush(cli, &w)
 		return 0
 	}
-	out(cli, "== what still misses (the synonym backlog) ==\n")
+	outf(cli, "== %s ==\n", phrase(cli, .Log_Misses))
 	print_box(cli, db, backlog, ..args_v)
 	if len(answered) > 0 {
-		outf(cli, "(%d missed then answered by a later edit: %s)\n", len(answered), strings.join(answered[:], ","))
+		said(cli, .Log_Answered, len(answered), strings.join(answered[:], ","))
 	}
-	out(cli, "\n== recent lookups ==\n")
+	outf(cli, "\n== %s ==\n", phrase(cli, .Log_Recent))
 	print_box(cli, db, recent)
-	out(cli, "\n== who asks: lookups, sessions and bytes returned per caller ==\n")
+	outf(cli, "\n== %s ==\n", phrase(cli, .Log_Who))
 	print_box(cli, db, callers)
 	return 0
 }

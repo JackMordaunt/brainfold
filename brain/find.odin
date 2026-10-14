@@ -437,7 +437,7 @@ cmd_find :: proc(cli: ^Cli, args: []string) -> int {
 				rest = rest[1:]
 			}
 			if !ok || n <= 0 {
-				return fail(cli, "usage: brain find --budget <tokens>")
+				return fail(cli, phrase(cli, .Usage_Find_Budget))
 			}
 			budget = n * 4
 		case:
@@ -445,7 +445,7 @@ cmd_find :: proc(cli: ^Cli, args: []string) -> int {
 		}
 	}
 	if len(terms) == 0 {
-		return fail(cli, "usage: brain find <terms...> [--budget <tokens>] [--raw|--terse]")
+		return fail(cli, phrase(cli, .Usage_Find))
 	}
 	db, oerr := open_index(cli)
 	if oerr != "" {
@@ -456,7 +456,7 @@ cmd_find :: proc(cli: ^Cli, args: []string) -> int {
 	raw := strings.join(terms[:], " ")
 	m, ok := build_match(db, raw)
 	if !ok {
-		return fail(cli, "empty query")
+		return fail(cli, phrase(cli, .Empty_Query))
 	}
 
 	hits := query_fts(db, m.and)
@@ -590,7 +590,7 @@ cmd_find :: proc(cli: ^Cli, args: []string) -> int {
 		}
 	}
 	if capped {
-		out(cli, "… output capped; narrow the query or raise --budget\n")
+		said(cli, .Output_Capped)
 	}
 	sqlite3.exec_args(db, "update queries set bytes=? where id=?", i64(written), qid)
 	return 0

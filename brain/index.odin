@@ -300,7 +300,7 @@ sync :: proc(cli: ^Cli, quiet: bool) -> string {
 	os.remove(strings.concatenate({tmp, "-wal"}))
 	os.remove(strings.concatenate({tmp, "-shm"}))
 	if !quiet {
-		outf(cli, "indexed %d bullets, %d links, %d files\n", bullets, links, len(files))
+		said(cli, .Indexed, bullets, links, len(files))
 	}
 	return ""
 }

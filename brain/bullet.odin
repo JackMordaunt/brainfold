@@ -327,12 +327,12 @@ bullet_touch :: proc(cli: ^Cli, handle, place: string) -> int {
 	text, _ := read_text(path.join(cli.vault, file))
 	lines := strings.split_lines(text)
 	if at < 1 || at > len(lines) {
-		return fail(cli, fmt.aprintf("%s has no line %d; reindex and try again", file, at))
+		return fail(cli, phrase(cli, .Bullet_No_Line, file, fmt.tprint(at)))
 	}
 	old := strings.trim_right_space(lines[at - 1])
 	b, ok := parse_bullet(old, "")
 	if !ok || !strings.has_suffix(old, b.date) {
-		return fail(cli, fmt.aprintf("%s:%d does not end in its date", file, at))
+		return fail(cli, phrase(cli, .Bullet_No_Date, file, fmt.tprint(at)))
 	}
 	line := strings.concatenate({old[:len(old) - len(b.date)], today_iso()})
 	if err := set_line(cli, file, at, handle, line); err != "" {

@@ -64,7 +64,7 @@ cmd_version :: proc(cli: ^Cli, args: []string) -> int {
 		jw_flush(cli, &w)
 		return 0
 	}
-	outf(cli, "brain %s (%s) built from %s\n", VERSION == "" ? "dev" : VERSION, ASSET, commit)
+	said(cli, .Version_Line, VERSION == "" ? "dev" : VERSION, ASSET, commit)
 	return 0
 }
 
@@ -92,9 +92,9 @@ cmd_update :: proc(cli: ^Cli, args: []string) -> int {
 	remember_check(cli, &r)
 	switch r.outcome {
 	case .Up_To_Date:
-		outf(cli, "brain %s is up to date\n", VERSION)
+		said(cli, .Version_Current, VERSION)
 	case .Applied:
-		outf(cli, "updated to %s via %s\n", selfupdate.version(&r), selfupdate.VIA_NAMES[r.via])
+		said(cli, .Version_Updated, selfupdate.version(&r), selfupdate.VIA_NAMES[r.via])
 	case .Update_Available, .Skipped:
 		outf(cli, "%s\n", selfupdate.message(&r))
 	case .Refused, .Failed:

@@ -95,7 +95,7 @@ cmd_import :: proc(cli: ^Cli, args: []string) -> int {
 			if proposal_fate(cli, line) != "new" {
 				continue
 			}
-			if code := propose_line(cli, line); code == 0 {
+			if code, _ := propose_line(cli, line); code == 0 {
 				queued += 1
 			}
 		}
@@ -113,7 +113,7 @@ cmd_import :: proc(cli: ^Cli, args: []string) -> int {
 		jw_flush(cli, &w)
 		return 0
 	}
-	outf(cli, "%d proposal(s) from %d memories in %d source(s); brain inbox lists them\n", queued, memories, len(sources))
+	said(cli, .Import_Line, queued, memories, len(sources))
 	return 0
 }
 
@@ -148,7 +148,7 @@ import_list :: proc(cli: ^Cli) -> int {
 	if cli.json {
 		jw_flush(cli, &w)
 	} else if len(sources) == 0 {
-		outf(cli, "no agent memories on this machine\n")
+		said(cli, .Import_None)
 	}
 	return 0
 }

@@ -196,7 +196,7 @@ recall_enabled :: proc(cli: ^Cli) -> bool {
 	if len(adapters_on(cli)) > 0 {
 		return true
 	}
-	errf(cli, "brain recall: no transcript sources enabled.\n\n")
+	errf(cli, "%s\n\n", phrase(cli, .Recall_No_Sources))
 	errf(cli, "  available: %s \n", strings.join(adapters_all(cli), " "))
 	errf(cli, "  enable one: brain recall --enable claude\n")
 	return false
@@ -243,11 +243,11 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 			return 0
 		case "--enable":
 			if len(rest) == 0 {
-				return fail(cli, "recall --enable <adapter>")
+				return fail(cli, phrase(cli, .Recall_Enable))
 			}
 			name := rest[0]
 			if _, ok := find_adapter(cli, name); !ok {
-				return fail(cli, fmt.aprintf("no such adapter: %s (have: %s )", name, strings.join(adapters_all(cli), " ")))
+				return fail(cli, phrase(cli, .Recall_No_Adapter, name, strings.concatenate({strings.join(adapters_all(cli), " "), " "})))
 			}
 			path.mkdirs(cli.conf_dir)
 			already := false
@@ -259,11 +259,11 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 			if !already {
 				path.append_file(cli.conf_sources, strings.concatenate({name, "\n"}))
 			}
-			outf(cli, "recall: %s enabled\n", name)
+			said(cli, .Recall_Enabled, name)
 			return 0
 		case "--disable":
 			if len(rest) == 0 {
-				return fail(cli, "recall --disable <adapter>")
+				return fail(cli, phrase(cli, .Recall_Disable))
 			}
 			name := rest[0]
 			if lines, err := path.read_lines(cli.conf_sources); err == nil {
@@ -279,7 +279,7 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 				}
 				path.write(cli.conf_sources, body)
 			}
-			outf(cli, "recall: %s disabled\n", name)
+			said(cli, .Recall_Disabled, name)
 			return 0
 		case "--full":
 			if len(rest) == 0 {
@@ -329,7 +329,7 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 			prefix = true
 		case:
 			if strings.has_prefix(arg, "-") {
-				return fail(cli, fmt.aprintf("recall: unknown flag %s", arg))
+				return fail(cli, phrase(cli, .Recall_Unknown, arg))
 			}
 			append(&terms, arg)
 		}
@@ -338,7 +338,7 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 		return 1
 	}
 	if len(terms) == 0 {
-		return fail(cli, "usage: brain recall <terms...>")
+		return fail(cli, phrase(cli, .Usage_Recall))
 	}
 	db, err := open_recall_db(cli)
 	if err != "" {
@@ -464,7 +464,7 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 	}
 	if n == 0 {
 		strings.builder_reset(&cli.out)
-		outf(cli, "nothing said about: %s\n", strings.join(terms[:], " "))
+		said(cli, .Recall_None, strings.join(terms[:], " "))
 		return 1
 	}
 	return 0
@@ -517,7 +517,7 @@ recall_around :: proc(cli: ^Cli, id: string, json_out: bool) -> int {
 	}
 	full := scalar_text(db, "select id from turn where id like ? limit 1", strings.concatenate({id, "%"}))
 	if full == "" {
-		return fail(cli, fmt.aprintf("recall: no turn %s", id))
+		return fail(cli, phrase(cli, .Recall_No_Turn, id))
 	}
 	session := scalar_text(db, "select session from turn where id=?", full)
 	title := scalar_text(db, "select title from turn where id=?", full)

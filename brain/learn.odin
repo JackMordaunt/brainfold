@@ -39,7 +39,7 @@ cmd_learn :: proc(cli: ^Cli, args: []string) -> int {
 		case "--apply":
 			apply = true
 		case:
-			return fail(cli, "usage: brain learn [--apply]")
+			return fail(cli, phrase(cli, .Usage_Learn))
 		}
 	}
 	if err := ensure_db(cli); err != "" {
@@ -106,14 +106,14 @@ cmd_learn :: proc(cli: ^Cli, args: []string) -> int {
 		jw_flush(cli, &w)
 		return 0
 	}
-	outf(cli, "%d serves with a session: %d used, %d named back by the agent\n", len(outcomes), used, strong)
-	out(cli, "\n== aliases to learn: a query word that found a bullet it does not name, in three sessions or more ==\n")
+	said(cli, .Learn_Serves, len(outcomes), used, strong)
+	outf(cli, "\n== %s ==\n", phrase(cli, .Learn_Head))
 	for c in candidates {
 		outf(cli, "%s **%s** += %s (%d sessions)\n", c.file, c.handle, c.term, c.sessions)
 	}
-	outf(cli, "\n== dead: not in any query for %d days ==\n", LEARN_DEAD_DAYS)
+	outf(cli, "\n== %s ==\n", phrase(cli, .Learn_Dead, LEARN_DEAD_DAYS))
 	if dead.too_few {
-		outf(cli, "   too few queries logged (%d) to call anything dead yet\n", LEARN_MIN_QUERIES)
+		outf(cli, "   %s\n", phrase(cli, .Learn_Few, LEARN_MIN_QUERIES))
 	}
 	for d in dead.aliases {
 		outf(cli, "alias %s\n", d)
@@ -122,9 +122,9 @@ cmd_learn :: proc(cli: ^Cli, args: []string) -> int {
 		outf(cli, "synonym %s\n", d)
 	}
 	if apply {
-		outf(cli, "\napplied %d edits\n", applied)
+		outf(cli, "\n%s\n", phrase(cli, .Learn_Applied, applied))
 	} else if len(candidates) > 0 || len(dead.synonyms) > 0 {
-		out(cli, "\n--apply writes the aliases into the bullets and the dead synonyms out of synonyms.tsv\n")
+		outf(cli, "\n%s\n", phrase(cli, .Learn_Hint))
 	}
 	return 0
 }

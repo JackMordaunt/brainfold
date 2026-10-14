@@ -59,12 +59,12 @@ cmd_ledger :: proc(cli: ^Cli, args: []string) -> int {
 		jw_flush(cli, &w)
 		return 0
 	}
-	outf(cli, "Tokens are bytes over four. Saved is against reading the three core files instead: %d KB, ~%d tokens per lookup.\n", baseline / 1000, baseline / 4)
-	out(cli, "\n== by caller ==\n")
+	said(cli, .Ledger_Blurb, baseline / 1000, baseline / 4)
+	outf(cli, "\n== %s ==\n", phrase(cli, .Ledger_Caller))
 	print_box(cli, db, by_caller, i64(baseline))
-	out(cli, "\n== recent sessions ==\n")
+	outf(cli, "\n== %s ==\n", phrase(cli, .Ledger_Sessions))
 	print_box(cli, db, by_session, i64(baseline))
-	outf(cli, "\n== last %d days ==\n", days)
+	outf(cli, "\n== %s ==\n", phrase(cli, .Ledger_Days, days))
 	print_box(cli, db, by_day, i64(baseline), since_arg)
 	return 0
 }

@@ -309,7 +309,7 @@ cmd_install :: proc(cli: ^Cli, args: []string) -> int {
 		case arg == "--new":
 			fresh = true
 		case strings.has_prefix(arg, "-"):
-			return fail(cli, fmt.aprintf("install: unknown flag %s", arg))
+			return fail(cli, phrase(cli, .Install_Unknown, arg))
 		case arg == "":
 		case:
 			given = arg
@@ -319,7 +319,7 @@ cmd_install :: proc(cli: ^Cli, args: []string) -> int {
 	// is not there yet; never over one that holds anything.
 	if fresh {
 		if given == "" {
-			return fail(cli, "install: --new needs the folder for the new vault")
+			return fail(cli, phrase(cli, .Install_New))
 		}
 		if !cli.dry {
 			if err := prepare_vault_dir(given); err != "" {

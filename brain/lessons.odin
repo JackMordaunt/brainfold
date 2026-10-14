@@ -62,7 +62,7 @@ cmd_lessons :: proc(cli: ^Cli, args: []string) -> int {
 				rest = rest[1:]
 			}
 			if !ok || n <= 0 {
-				return fail(cli, "usage: brain lessons --since <days>d")
+				return fail(cli, phrase(cli, .Usage_Since))
 			}
 			days = n
 		case "--project", "--session":
@@ -82,11 +82,11 @@ cmd_lessons :: proc(cli: ^Cli, args: []string) -> int {
 				rest = rest[1:]
 			}
 			if !ok || n <= 0 {
-				return fail(cli, "usage: --budget <tokens>")
+				return fail(cli, phrase(cli, .Usage_Budget))
 			}
 			budget = n * 4
 		case:
-			return fail(cli, "usage: brain lessons [--since <days>d] [--project <name>] [--session <id>] [--propose]")
+			return fail(cli, phrase(cli, .Usage_Lessons))
 		}
 	}
 	if !recall_enabled(cli) {
@@ -104,7 +104,8 @@ cmd_lessons :: proc(cli: ^Cli, args: []string) -> int {
 		if verr := need_vault(cli); verr != "" {
 			return fail(cli, verr)
 		}
-		return lessons_propose(cli, moments)
+		code, _ := lessons_propose(cli, moments)
+		return code
 	}
 	if cli.json {
 		w := jw_make()
@@ -128,7 +129,7 @@ cmd_lessons :: proc(cli: ^Cli, args: []string) -> int {
 		return len(moments) > 0 ? 0 : 1
 	}
 	if len(moments) == 0 {
-		outf(cli, "no corrections or retries in the last %d days\n", days)
+		said(cli, .Lessons_None, days)
 		return 1
 	}
 	out(cli, cut_lines(render_moments(moments), budget))
@@ -360,16 +361,15 @@ edit_distance :: proc(a, b: string) -> int {
 
 // lessons_propose queues one bullet per moment. The handle is the lesson
 // in a few words; the source is the turn it came from.
-lessons_propose :: proc(cli: ^Cli, moments: []Moment) -> int {
+lessons_propose :: proc(cli: ^Cli, moments: []Moment) -> (code: int, n: int) {
 	json_mode := cli.json
 	cli.json = false
 	defer cli.json = json_mode
 	proposed := 0
 	for m in moments {
 		line := lesson_bullet(m)
-		mark := strings.builder_len(cli.out)
-		propose_line(cli, line)
-		if strings.has_prefix(strings.to_string(cli.out)[mark:], "proposed") {
+		_, wrote := propose_line(cli, line)
+		if wrote {
 			proposed += 1
 		}
 	}
@@ -382,9 +382,9 @@ lessons_propose :: proc(cli: ^Cli, moments: []Moment) -> int {
 		jw_end_obj(&w)
 		jw_flush(cli, &w)
 	} else if len(moments) == 0 {
-		out(cli, "nothing to propose\n")
+		said(cli, .Lessons_Nothing)
 	}
-	return 0
+	return 0, proposed
 }
 
 lesson_bullet :: proc(m: Moment) -> string {

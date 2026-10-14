@@ -82,9 +82,9 @@ cmd_review :: proc(cli: ^Cli, args: []string) -> int {
 		jw_end_obj(&w)
 		jw_flush(cli, &w)
 	} else if mode == .After {
-		out(cli, "review after: proposals answer finds at once, marked unreviewed, until dropped\n")
+		said(cli, .Review_After_Long)
 	} else {
-		out(cli, "review before: proposals wait in the inbox until approved\n")
+		said(cli, .Review_Before_Long)
 	}
 	return 0
 }
@@ -121,14 +121,15 @@ cmd_propose :: proc(cli: ^Cli, args: []string) -> int {
 	}
 	line := strings.trim_space(strings.join(rest[:], " "))
 	if line == "" {
-		return fail(cli, "usage: brain propose [--force] '- **handle** (aliases: ...) — fact — source — YYYY-MM-DD'")
+		return fail(cli, phrase(cli, .Usage_Propose))
 	}
 	// settle says "reply none"; agents run it as a command. Nothing to record.
 	if strings.to_lower(strings.trim(line, "'\"")) == "none" {
-		out(cli, "nothing proposed\n")
+		said(cli, .Nothing_Proposed)
 		return 0
 	}
-	return propose_line(cli, complete_bullet(line, caller_id(cli)), force)
+	code, _ := propose_line(cli, complete_bullet(line, caller_id(cli)), force)
+	return code
 }
 
 // propose_line queues one completed bullet line, or says why not.
@@ -177,36 +178,31 @@ restating_bullet :: proc(cli: ^Cli, b: Bullet) -> Hit {
 	return {}
 }
 
-propose_line :: proc(cli: ^Cli, line: string, force := false) -> int {
+propose_line :: proc(cli: ^Cli, line: string, force := false) -> (int, bool) {
 	b, ok := parse_bullet(line, "")
 	if !ok {
-		return fail(cli, strings.concatenate({"not a bullet: it needs `- **handle**`, a fact and a date; got: ", line}))
+		return fail(cli, phrase(cli, .Not_A_Bullet, line)), false
 	}
 	guard: Guard
 	guard_init(&guard, worktree_strict(cli.vault))
 	defer guard_destroy(&guard)
 	if why := guard_line(&guard, line); why != "" {
-		return fail(cli, strings.concatenate({"not proposed: the bullet ", why}))
+		return fail(cli, phrase(cli, .Not_Proposed, why)), false
 	}
 	if why := scratch_path(line); why != "" {
-		return fail(cli, strings.concatenate({"not proposed: the bullet ", why}))
+		return fail(cli, phrase(cli, .Not_Proposed, why)), false
 	}
 	if !force {
 		if dup := restating_bullet(cli, b); dup.handle != "" {
-			return fail(
-				cli,
-				strings.concatenate(
-					{
-						"not proposed: the bullet restates **",
-						dup.handle,
-						"** (",
-						dup.file,
-						":",
-						int_str(dup.line),
-						"); if it corrects that bullet, propose again with --force and say what changed",
-					},
-				),
-			)
+			return fail(cli, phrase(cli, .Not_Proposed, strings.concatenate({
+				"restates **",
+				dup.handle,
+				"** (",
+				dup.file,
+				":",
+				int_str(dup.line),
+				"); if it corrects that bullet, propose again with --force and say what changed",
+			}))), false
 		}
 	}
 	return inbox_write(cli, line, b)
@@ -248,7 +244,10 @@ proposal_fate :: proc(cli: ^Cli, line: string) -> string {
 // inbox_write appends a parsed bullet to the inbox unless a person dropped
 // the same fact before or the same handle is already waiting; tend's
 // hygiene items take this path too, past the checks a fact gets.
-inbox_write :: proc(cli: ^Cli, line: string, b: Bullet) -> int {
+// inbox_write reports whether the line is a new proposal. Dropped and
+// already-waiting facts print a reason and come back unproposed, so a
+// counter does not have to read the translated sentence.
+inbox_write :: proc(cli: ^Cli, line: string, b: Bullet) -> (code: int, proposed: bool) {
 	dropped, _ := read_text(path.join(cli.vault, DROPPED_FILE))
 	for l in strings.split_lines(dropped) {
 		d, dok := parse_bullet(l, "")
@@ -256,9 +255,9 @@ inbox_write :: proc(cli: ^Cli, line: string, b: Bullet) -> int {
 			if cli.json {
 				propose_json(cli, "dropped", 0, b.handle)
 			} else {
-				outf(cli, "a person dropped this fact before; not proposed: %s\n", l)
+				said(cli, .Dropped_Before, l)
 			}
-			return 0
+			return 0, false
 		}
 	}
 	inbox := path.join(cli.vault, INBOX_FILE)
@@ -277,28 +276,28 @@ inbox_write :: proc(cli: ^Cli, line: string, b: Bullet) -> int {
 			if cli.json {
 				propose_json(cli, "already", n, b.handle)
 			} else {
-				outf(cli, "already proposed as #%d: **%s**\n", n, b.handle)
+				said(cli, .Already_Proposed, fmt.tprint(n), b.handle)
 			}
-			return 0
+			return 0, false
 		}
 	}
 	if !strings.has_suffix(text, "\n") {
 		text = strings.concatenate({text, "\n"})
 	}
 	if werr := path.write(inbox, strings.concatenate({text, line, "\n"})); werr != nil {
-		return fail(cli, fmt.aprintf("cannot write %s: %v", inbox, werr))
+		return fail(cli, fmt.aprintf("cannot write %s: %v", inbox, werr)), false
 	}
 	n += 1
 	if cli.json {
 		propose_json(cli, "proposed", n, b.handle)
 	} else if is_tend(b) {
-		outf(cli, "proposed #%d **%s**; brain inbox approve %d applies it\n", n, b.handle, n)
+		said(cli, .Proposed_Approve, fmt.tprint(n), b.handle, fmt.tprint(n))
 	} else if review_mode(cli) == .After {
-		outf(cli, "proposed #%d **%s**; it answers finds now, marked unreviewed, until a person drops it\n", n, b.handle)
+		said(cli, .Proposed_Live, fmt.tprint(n), b.handle)
 	} else {
-		outf(cli, "proposed #%d **%s**; a person approves it with: brain inbox approve %d\n", n, b.handle, n)
+		said(cli, .Proposed_Wait, fmt.tprint(n), b.handle, fmt.tprint(n))
 	}
-	return 0
+	return 0, true
 }
 
 propose_json :: proc(cli: ^Cli, status: string, n: int, handle: string) {
@@ -401,12 +400,12 @@ cmd_inbox :: proc(cli: ^Cli, args: []string) -> int {
 			jw_end_obj(&w)
 			jw_flush(cli, &w)
 		} else if n == 0 {
-			out(cli, "inbox empty\n")
+			said(cli, .Inbox_Empty)
 		}
 		return 0
 	}
 	if !exists {
-		return fail(cli, "inbox empty")
+		return fail(cli, phrase(cli, .Inbox_Empty))
 	}
 	usage := "usage: brain inbox [approve <n>|all [--to MEMORY|LEARNINGS|TUNINGS] | drop <n> | review <n> | merge <n> --into <handle> [--at FILE:LINE] '<bullet>']"
 	if len(args) < 2 {
@@ -434,7 +433,7 @@ cmd_inbox :: proc(cli: ^Cli, args: []string) -> int {
 		}
 	}
 	if at < 0 {
-		return fail(cli, fmt.aprintf("no proposal #%d; brain inbox lists them", want))
+		return fail(cli, phrase(cli, .No_Proposal, fmt.tprint(want)))
 	}
 	chosen := lines[at]
 	switch args[0] {
@@ -462,7 +461,7 @@ cmd_inbox :: proc(cli: ^Cli, args: []string) -> int {
 			if cli.json {
 				inbox_json(cli, "applied", want, chosen.bullet.handle, "")
 			} else {
-				outf(cli, "applied #%d **%s**\n", want, chosen.bullet.handle)
+				said(cli, .Applied, fmt.tprint(want), chosen.bullet.handle)
 			}
 			return 0
 		}
@@ -482,7 +481,7 @@ cmd_inbox :: proc(cli: ^Cli, args: []string) -> int {
 		if cli.json {
 			inbox_json(cli, "approved", want, chosen.bullet.handle, rel)
 		} else {
-			outf(cli, "approved #%d **%s** -> %s\n", want, chosen.bullet.handle, rel)
+			said(cli, .Approved_To, fmt.tprint(want), chosen.bullet.handle, rel)
 		}
 	case "drop":
 		if len(args) != 2 {
@@ -505,7 +504,7 @@ cmd_inbox :: proc(cli: ^Cli, args: []string) -> int {
 		if cli.json {
 			inbox_json(cli, "dropped", want, chosen.bullet.handle, "")
 		} else {
-			outf(cli, "dropped #%d **%s**\n", want, chosen.bullet.handle)
+			said(cli, .Dropped_N, fmt.tprint(want), chosen.bullet.handle)
 		}
 	case:
 		return fail(cli, usage)
@@ -566,7 +565,7 @@ inbox_approve_all :: proc(cli: ^Cli, lines: []Inbox_Line, args: []string, usage:
 		}
 	}
 	if len(chosen) == 0 {
-		return fail(cli, "inbox empty")
+		return fail(cli, phrase(cli, .Inbox_Empty))
 	}
 	if err := append_bullets(cli, rel, chosen[:]); err != "" {
 		return fail(cli, err)
@@ -593,7 +592,7 @@ inbox_approve_all :: proc(cli: ^Cli, lines: []Inbox_Line, args: []string, usage:
 		jw_flush(cli, &w)
 	} else {
 		for l, i in chosen {
-			outf(cli, "approved #%d **%s** -> %s\n", i + 1, l.bullet.handle, rel)
+			said(cli, .Approved_To, fmt.tprint(i + 1), l.bullet.handle, rel)
 		}
 	}
 	return 0

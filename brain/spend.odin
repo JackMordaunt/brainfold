@@ -66,7 +66,7 @@ cmd_spend :: proc(cli: ^Cli, args: []string) -> int {
 		if err := set_price(cli, args[1], args[2], args[3]); err != "" {
 			return fail(cli, err)
 		}
-		outf(cli, "%s priced at $%s in, $%s out per million tokens\n", args[1], args[2], args[3])
+		said(cli, .Spend_Priced, args[1], args[2], args[3])
 		return 0
 	}
 	days := SPEND_DAYS
@@ -103,16 +103,24 @@ cmd_spend :: proc(cli: ^Cli, args: []string) -> int {
 		spend_json(cli, s)
 		return 0
 	}
-	outf(cli, "last %d days: $%.2f over %d sessions", days, s.cost, s.sessions)
+	out(cli, phrase(cli, .Spend_Window, days, fmt.tprintf("%.2f", s.cost), s.sessions))
 	if s.unpriced > 0 {
-		outf(cli, " (%s tokens on models with no price left out)", int_str(s.unpriced))
+		outf(cli, " %s", phrase(cli, .Spend_Unpriced, int_str(s.unpriced)))
 	}
-	outf(cli, "\nthe vault served %s tokens in %d lookups, %d answered\n", int_str(s.served), s.lookups, s.answered)
+	outf(cli, "\n%s\n", phrase(cli, .Spend_Served, int_str(s.served), s.lookups, s.answered))
 	l := s.finds
 	if l.enough {
-		outf(cli, "after a find that answered, an agent spent $%.3f to finish (median of %d); after a miss, $%.3f (%d): about $%.2f saved\n", l.hit_cost, l.hits, l.miss_cost, l.misses, l.saved)
+		said(
+			cli,
+			.Spend_Saved,
+			fmt.tprintf("%.3f", l.hit_cost),
+			l.hits,
+			fmt.tprintf("%.3f", l.miss_cost),
+			l.misses,
+			fmt.tprintf("%.2f", l.saved),
+		)
 	} else {
-		outf(cli, "%d finds answered and %d missed: too few of each (%d) to say what answering saved\n", l.hits, l.misses, LOOKUP_MIN)
+		said(cli, .Spend_Few, l.hits, l.misses, LOOKUP_MIN)
 	}
 	return 0
 }

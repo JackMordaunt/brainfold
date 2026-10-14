@@ -52,7 +52,7 @@ cmd_verify :: proc(cli: ^Cli, args: []string) -> int {
 			apply = true
 		case:
 			if strings.has_prefix(a, "-") {
-				return fail(cli, "usage: brain verify [<handle>...] [--apply]")
+				return fail(cli, phrase(cli, .Usage_Verify))
 			}
 			append(&only, strings.to_lower(a))
 		}
@@ -104,14 +104,14 @@ cmd_verify :: proc(cli: ^Cli, args: []string) -> int {
 		jw_flush(cli, &w)
 		return failed > 0 ? 1 : 0
 	}
-	outf(cli, "%d bullets make %d checkable claims; %d failed\n", bullets, len(claims), failed)
+	said(cli, .Verify_Head, bullets, len(claims), failed)
 	for c in claims {
 		if c.verdict == "failed" {
 			outf(cli, "%s:%d **%s** %s %s: %s\n", c.file, c.line, c.handle, c.kind, c.text, c.why)
 		}
 	}
 	if apply {
-		outf(cli, "dated today: %d bullets whose claims all passed\n", applied)
+		said(cli, .Verify_Dated, applied)
 	}
 	return failed > 0 ? 1 : 0
 }
