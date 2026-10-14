@@ -7,10 +7,8 @@
 #   just test      the package's tests against the fixture vault
 #   just check     type-check for linux, darwin and windows, debug and release
 #   just install   bind this machine to a vault
-#   just logo      open the logo lab, hot-reloading tools/logo as it is edited
 #   just desk      open the desk, hot-reloading tools/desk; desk-png, desk-test
-#   just hot DIR TITLE  the loop under both: any jm:ui child in a window
-#   just branding  regenerate branding/ (SVG from tools/logo, PNG via rsvg-convert)
+#   just hot DIR TITLE  the loop under the desk: any jm:ui child in a window
 #   just proof     what a lookup costs a real agent session: vanilla, plain markdown, brain
 #   just suite     every proof experiment in tools/proof/AXES.md, smoke size; SMOKE=0 for all
 #   just preview   render README.md, ARCHITECTURE.md and docs/ to build/ and open them
@@ -29,7 +27,7 @@ commit := `git rev-parse --short HEAD 2>/dev/null || echo unknown`
 dirty  := `git status --porcelain 2>/dev/null | head -c 1`
 stamp  := commit + (if dirty != "" { "-dirty" } else { "" })
 flags := "-vet -strict-style -collection:jm=" + jm + " -define:BRAIN_TOOL=" + root + " -define:COMMIT='\"" + stamp + "\"'"
-# The same without BRAIN_TOOL, which only the CLI reads: tools/logo would warn.
+# The same without BRAIN_TOOL, which only the CLI reads: a jm:ui child would warn.
 uiflags := "-vet -strict-style -collection:jm=" + jm
 # `just build SAN=` drops the sanitizer when a library gets in its way.
 san   := env("SAN", "-sanitize:address")
@@ -239,9 +237,6 @@ hot DIR TITLE SIZE="1440x960" HOST="tools/host": deps ui-deps
       rm -f "$restart"
     done
 
-# Open the logo lab, hot-reloading tools/logo as it is edited
-logo: (hot "tools/logo" "brainfold · logo lab")
-
 # The native libraries jm:ui links: Blend2D draws, kb shapes text, AccessKit
 # serves assistive technology. Each is built or fetched once, into jm.
 #
@@ -278,22 +273,6 @@ desk-test: deps
     for p in cli view app; do
       {{odin}} test tools/desk/$p {{san}} {{uiflags}} -out:build/test/desk-$p{{exe}}
     done
-
-# branding/ holds the mark tools/logo settled on. The SVGs come from the
-# same geometry the lab draws; the PNGs are rasterised from them, so
-# editing tools/logo and rerunning this is the whole workflow. Needs
-# rsvg-convert (librsvg); the hero's wordmark wants JetBrains Mono installed.
-#
-# Regenerate branding/ from tools/logo
-branding: deps
-    mkdir -p build/debug branding
-    {{odin}} build tools/logo -debug {{uiflags}} {{cxx_link}} -out:build/debug/logo{{exe}}
-    build/debug/logo{{exe}} -svg branding
-    for s in light dark; do \
-      rsvg-convert -w 1024 -h 1024 branding/mark-$s.svg -o branding/mark-$s.png; \
-      rsvg-convert -w 1400 -h 400 branding/hero-$s.svg -o branding/hero-$s.png; \
-    done
-    ls -l branding
 
 # A local look at the docs as GitHub would show them: comrak (GitHub's
 # dialect, raw HTML kept so the hero's <picture> survives) into a bare page

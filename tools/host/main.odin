@@ -1,10 +1,10 @@
 // The window half of every hot-reloaded tool in this repository: it owns
 // the SDL window and respawns the child whenever the pointer file names a
 // new build. It never links the child's code, so a rebuild of the child
-// is all a change takes. See `just hot`, `just logo` and `just desk`.
+// is all a change takes. See `just hot` and `just desk`.
 //
-//	host build/logo.watch "brainfold · logo lab" 1440x960
-//	host build/debug/logo                            a fixed child, default title and size
+//	host build/desk.watch "brainfold" 1440x960
+//	host build/debug/desk                            a fixed child, default title and size
 package main
 
 import "core:fmt"

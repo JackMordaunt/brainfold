@@ -959,7 +959,7 @@ empty :: proc(gtx: ^ui.Ctx, heading, description: string, icon: primer.Icon) {
 
 // mark is brainfold's mark as a widget, size square, in color: bullet
 // lines filling a disc, split by a wandering fissure. The geometry is
-// tools/logo's fissure_bars, which branding/mark-*.svg is written from.
+// the one branding/mark-*.svg was exported from.
 mark :: proc(gtx: ^ui.Ctx, size: f32, color: ops.Color) {
 	ui.sized(gtx, {min = {size, size}, max = {size, size}})
 	R :: 38 // the disc's radius, in the mark's 100 box

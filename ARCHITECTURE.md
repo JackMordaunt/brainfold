@@ -517,11 +517,10 @@ them up.
 | `.gitleaks.toml` | the default ruleset `brain secrets` applies |
 | `starter/` | the vault `brain install` creates when none exists |
 | `testdata/` | the fixture vault and transcripts the test suite runs against |
-| `branding/` | the mark and hero lockup, light and dark, SVG and PNG; `just branding` regenerates them |
-| `tools/logo/` | the logo lab: the mark's geometry, its SVG writer, and the grid of variations it was chosen from (`just logo`) |
+| `branding/` | the mark and hero lockup, light and dark, SVG and PNG, exported from the logo tool (`just export brainfold DIR` there); the platform badges are static |
 | `tools/proof/` | the proof: the same questions asked of real Claude Code sessions with no notes, with the vault as plain markdown, through brain, and with the hooks alone (`brain-auto`); `just proof`, then `regrade.sh` to re-score a run without re-running it |
 | `tools/desk/` | the desk: the control room over a vault on jm:ui/primer. Each page needs what it shows; `app/` answers by running `brain <command> --json` on worker threads, re-reads what is still needed every 5 s and after each command, and `host/` owns the window and the application while the view hot-reloads (`just desk`, `just desk-png`, `just desk-test`) |
-| `tools/host/` | the window the logo lab runs in; `just hot DIR TITLE` rebuilds a child on save and the host respawns it |
+| `tools/host/` | the default window for `just hot DIR TITLE`, which rebuilds a child on save and the host respawns it |
 | `jm/` | the [jm collection](https://mordaunt.dev/code/jm), pinned as a submodule |
 
 `testdata/vault` is a fixture of exactly the vault's shape; `just test` runs
@@ -548,8 +547,6 @@ just release   optimised binary                                -> build/release
 just test      the package's tests against the fixture vault
 just check     type-check for linux, darwin and windows
 just install   bind this machine to a vault
-just logo      open the logo lab
 just desk      open the desk
-just branding  regenerate branding/
 just preview   render the docs to build/ and open them
 ```

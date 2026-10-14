@@ -1,8 +1,8 @@
 # branding
 
 brainfold's mark, the hero lockup and the platform badges, each in a light and a
-dark version. `just branding` regenerates the mark and hero from
-`tools/logo`; the badges are static.
+dark version. The mark and hero are exported from the logo tool, which
+keeps the candidates the fissure was chosen from; the badges are static.
 
 | file | what it is |
 |------|------------|
