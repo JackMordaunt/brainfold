@@ -684,6 +684,21 @@ Msg :: enum u16 {
 	Ago_Year,
 	Place,
 	Asked_For,
+	Word_Never,
+	Word_Today,
+	Word_Yesterday,
+	Label_Folder,
+	Label_Bullets,
+	Label_File,
+	Label_Claim,
+	Label_Checked,
+	Label_In,
+	Label_Dated,
+	Label_Length,
+	Label_Aliases,
+	Label_Vault,
+	Label_Checkout,
+	Price_From,
 }
 
 // SOURCES is each shipped locale's text. A locale without one is not offered.
