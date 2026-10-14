@@ -268,8 +268,9 @@ sync :: proc(cli: ^Cli, quiet: bool) -> string {
 	// rebuild it, and a shared name let one remove the file another was
 	// writing, which SQLite reports as "attempt to write a readonly
 	// database". Each swaps a whole index in; the last to finish wins.
-	// An index from before log.db holds the log; it moves out before this
-	// build replaces it, or the swap would erase it.
+	// On Windows that swap waits while a reader still has the file open
+	// (replace_file). An index from before log.db holds the log; it moves
+	// out before this build replaces it, or the swap would erase it.
 	if nonempty_file(cli.db) {
 		db, err := open_index(cli)
 		if err != "" {
@@ -403,31 +404,6 @@ step :: proc(stmt: ^sqlite3.Stmt, args: ..sqlite3.Value) -> string {
 	}
 	if e := sqlite3.reset(stmt); e != nil {
 		return sql_err(e)
-	}
-	return ""
-}
-
-// carry_log copies the query log from the previous index. A log written
-// before the caller or bytes columns existed carries over with them empty. Bullet
-// row ids are reassigned on every sync, so hits are recorded by handle and
-// copy across unchanged. Failures are ignored: an old file that cannot be
-// read costs the log, not the index.
-// replace_file moves src over dst, which may exist. Where rename replaces
-// in one step (POSIX), a reader never finds dst missing; where it cannot,
-// dst is removed first.
-replace_file :: proc(src, dst: string) -> string {
-	if os.rename(src, dst) == nil {
-		return ""
-	}
-	if os.exists(dst) {
-		if err := os.remove(dst); err != nil {
-			os.remove(src)
-			return fmt.aprintf("cannot replace %s: %v", dst, err)
-		}
-	}
-	if err := os.rename(src, dst); err != nil {
-		os.remove(src)
-		return fmt.aprintf("cannot move %s to %s: %v", src, dst, err)
 	}
 	return ""
 }
