@@ -24,7 +24,6 @@ order.
 package desk_app
 
 import "core:encoding/cbor"
-import "core:fmt"
 import "core:hash"
 import "core:mem"
 import "core:strings"
@@ -35,6 +34,7 @@ import "core:time"
 import "jm:stream"
 import "jm:ui"
 
+import "../../../msg"
 import "../cli"
 import "../shapes"
 
@@ -556,6 +556,7 @@ deliver :: proc(h: ^Host, d: Read_Done) {
 
 // act_one runs on a worker: the CLI calls for one command.
 act_one :: proc(h: ^Host, a: Act) -> Act_Done {
+	msg.refresh()
 	arena: mem.Dynamic_Arena
 	mem.dynamic_arena_init(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
@@ -634,17 +635,17 @@ Finding_Kind :: enum u8 {
 	Never_Returned,
 }
 
-// FINDING_NAMES is each kind as a count reads: one, many.
-FINDING_NAMES := [Finding_Kind][2]string {
-	.Failed_Claim     = {"failed claim", "failed claims"},
-	.Stale            = {"stale bullet", "stale bullets"},
-	.Dead_Link        = {"dead link", "dead links"},
-	.Duplicate_Handle = {"duplicate handle", "duplicate handles"},
-	.Thin_Aliases     = {"bullet with thin aliases", "bullets with thin aliases"},
-	.Oversized        = {"oversized bullet", "oversized bullets"},
-	.Orphaned_Note    = {"orphaned note", "orphaned notes"},
-	.Worth_Promoting  = {"bullet worth promoting", "bullets worth promoting"},
-	.Never_Returned   = {"bullet never returned", "bullets never returned"},
+// KIND_MSG is each kind's noun, in the form the count's plural rule picks.
+KIND_MSG := [Finding_Kind]msg.Msg {
+	.Failed_Claim     = .Name_Failed,
+	.Stale            = .Name_Stale,
+	.Dead_Link        = .Name_Link,
+	.Duplicate_Handle = .Name_Dupe,
+	.Thin_Aliases     = .Name_Thin,
+	.Oversized        = .Name_Over,
+	.Orphaned_Note    = .Name_Orphan,
+	.Worth_Promoting  = .Name_Promote,
+	.Never_Returned   = .Name_Never,
 }
 
 Findings :: [Finding_Kind]int
@@ -683,7 +684,7 @@ summarise :: proc(before: Findings, had: bool, now: Findings, allocator := conte
 		total += n
 	}
 	if !had {
-		return fmt.aprintf("Doctor found %d findings", total, allocator = allocator)
+		return msg.textf(.Doctor_Found, total, allocator = allocator)
 	}
 	b := strings.builder_make(allocator)
 	for k in Finding_Kind {
@@ -695,12 +696,14 @@ summarise :: proc(before: Findings, had: bool, now: Findings, allocator := conte
 			strings.write_string(&b, ", ")
 		}
 		n := abs(diff)
-		fmt.sbprintf(&b, "%d %s %s", n, diff > 0 ? "new" : "fewer", FINDING_NAMES[k][n == 1 ? 0 : 1])
+		noun := msg.text_form(KIND_MSG[k], n)
+		clause := msg.textf(diff > 0 ? .Count_New : .Count_Fewer, n, noun, allocator = allocator)
+		strings.write_string(&b, clause)
 	}
 	if strings.builder_len(b) == 0 {
-		return fmt.aprintf("No change since the last run: %d findings", total, allocator = allocator)
+		return msg.textf(.Doctor_Same, total, allocator = allocator)
 	}
-	return fmt.aprintf("Since the last run: %s", strings.to_string(b), allocator = allocator)
+	return msg.textf(.Doctor_Since, strings.to_string(b), allocator = allocator)
 }
 
 // run_doctor makes a fresh report and says what changed since the last.
@@ -718,7 +721,7 @@ run_doctor :: proc(h: ^Host, a: Act, allocator: mem.Allocator) -> Act_Done {
 	r.summary = summarise(before, had, now)
 	data, err := cbor.marshal_into_bytes(r, allocator = h.allocator, temp_allocator = allocator)
 	if err != nil {
-		return {act = a, outcome = {done = true, message = strings.clone("The report could not be read", h.allocator)}}
+		return {act = a, outcome = {done = true, message = strings.clone(msg.text(.Report_Unreadable), h.allocator)}}
 	}
 	return {act = a, outcome = {done = true, ok = true, message = strings.clone(r.summary, h.allocator)}, doctor = data}
 }

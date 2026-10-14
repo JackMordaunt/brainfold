@@ -5,12 +5,14 @@ import "core:math"
 import "core:strconv"
 import "core:strings"
 
+import "jm:i18n"
 import "jm:ui"
 import "jm:ui/ops"
 import "jm:ui/plot"
 import plot_primer "jm:ui/plot/primer"
 import "jm:ui/primer"
 
+import "../../../msg"
 import "../shapes"
 
 // --- Savings -------------------------------------------------------------------
@@ -21,7 +23,7 @@ SPEND_WINDOWS :: [3]int{7, 30, 90}
 // savings_control is the window the page looks back over.
 savings_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	segments := []primer.Segment{{label = "7d"}, {label = "30d"}, {label = "90d"}}
-	primer.segmented_control(gtx, segments, &m.spend_window, "Window")
+	primer.segmented_control(gtx, segments, &m.spend_window, tr(m, .Window))
 }
 
 // page_savings is what the agents cost and what the vault did to it:
@@ -36,24 +38,24 @@ page_savings :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		loading(gtx, 6)
 		return
 	}
-	if failed(gtx, sp.error) {
+	if failed(gtx, m, sp.error) {
 		return
 	}
 	f := &sp.finds
 	short := gtx.constraints.max.y < COMPACT_BELOW
-	saved, saved_note := "—", fmt.tprintf("needs %d finds that answered and %d that missed; %d and %d so far", 5, 5, f.hits, f.misses)
+	saved, saved_note := "—", tf(m, .Savings_Need, 5, 5, f.hits, f.misses)
 	if f.enough {
-		saved = dollars(f.saved)
-		saved_note = fmt.tprintf("observed, %d answered finds", f.hits)
+		saved = dollars(f.saved, msg.locale(&m.strings))
+		saved_note = tf(m, .Savings_Observed, f.hits)
 	}
 	stats(
 		gtx,
 		body_width(m),
 		{
-			{"Spent", dollars(sp.cost), sp.unpriced > 0 ? fmt.tprintf("%d sessions · some unpriced", sp.sessions) : fmt.tprintf("%d sessions, list prices", sp.sessions)},
-			{"The vault cost", dollars(sp.served_cost), fmt.tprintf("%s tokens served", compact(int(sp.served)))},
-			{"Saved by answers", saved, saved_note},
-			{"Lookups answered", percent(sp.answered, sp.lookups), fmt.tprintf("%s of %s", thousands(sp.answered), thousands(sp.lookups))},
+			{tr(m, .Spent), dollars(sp.cost, msg.locale(&m.strings)), sp.unpriced > 0 ? tf(m, .Sessions_Unpriced, sp.sessions) : tf(m, .Sessions_Priced, sp.sessions)},
+			{tr(m, .Vault_Cost), dollars(sp.served_cost, msg.locale(&m.strings)), tf(m, .Tokens_Served_Note, compact(int(sp.served), msg.locale(&m.strings)))},
+			{tr(m, .Saved_By_Answers), saved, saved_note},
+			{tr(m, .Lookups_Answered), percent(sp.answered, sp.lookups, msg.locale(&m.strings)), tf(m, .Of_Count, sp.answered, sp.lookups)},
 		},
 		short,
 	)
@@ -70,21 +72,21 @@ page_savings :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	arrange(gtx, m)
 	w := split(gtx, m, 0.5, 0.5)
 	{
-		pane(gtx, m, .Spend_Models, w[0], "By model", len(sp.by_model))
+		pane(gtx, m, .Spend_Models, w[0], tr(m, .By_Model), len(sp.by_model))
 		if len(sp.by_model) == 0 {
-			empty(gtx, "No replies yet", "Spend shows here once an agent's transcripts are read: brain recall --enable claude.", .Graph)
+			empty(gtx, tr(m, .No_Replies), tr(m, .No_Replies_Body), .Graph)
 		} else {
 			spend_models(gtx, m, sp)
 		}
 	}
-	pane(gtx, m, .Spend_Agents, w[1], "By agent", len(sp.by_agent))
+	pane(gtx, m, .Spend_Agents, w[1], tr(m, .By_Agent), len(sp.by_agent))
 	if len(sp.by_agent) == 0 {
-		empty(gtx, "No agents yet", "Each agent whose transcripts are read shows here.", .Graph)
+		empty(gtx, tr(m, .No_Agents), tr(m, .No_Agents_Body), .Graph)
 		return
 	}
-	l := primer.action_list_open(gtx, .Full, dividers = true, name = "By agent")
+	l := primer.action_list_open(gtx, .Full, dividers = true, name = tr(m, .By_Agent))
 	for r in sp.by_agent {
-		primer.action_list_item(&l, r.name, description = fmt.tprintf("%d sessions · %s tokens", r.sessions, compact(int(r.tokens))), description_variant = .Block, leading = .Comment_Discussion, trailing_text = r.priced ? dollars(r.cost) : fmt.tprintf("%s+", dollars(r.cost)))
+		primer.action_list_item(&l, r.name, description = tf(m, .Agent_Sessions, r.sessions, compact(int(r.tokens), msg.locale(&m.strings))), description_variant = .Block, leading = .Comment_Discussion, trailing_text = r.priced ? dollars(r.cost, msg.locale(&m.strings)) : tf(m, .Price_From, dollars(r.cost, msg.locale(&m.strings))))
 	}
 	primer.action_list_close(&l)
 }
@@ -94,10 +96,10 @@ page_savings :: proc(gtx: ^ui.Ctx, m: ^Model) {
 spend_charts :: proc(gtx: ^ui.Ctx, m: ^Model, sp: ^shapes.Spend_Result, w: []ops.Size) {
 	style := plot_primer.style(gtx)
 	{
-		pane(gtx, m, .Chart_Spend, w[0], "Spend a day", scroll = false)
+		pane(gtx, m, .Chart_Spend, w[0], tr(m, .Spend_A_Day), scroll = false)
 		ui.inset(gtx, {16, 8, 16, 8})
 		if len(sp.by_day) == 0 {
-			empty(gtx, "Nothing spent", "", .Graph)
+			empty(gtx, tr(m, .Nothing_Spent), "", .Graph)
 		} else {
 			// Days on a time axis: a month of day names as bar labels
 			// crowds them.
@@ -108,9 +110,9 @@ spend_charts :: proc(gtx: ^ui.Ctx, m: ^Model, sp: ^shapes.Spend_Result, w: []ops
 				vals[i] = d.cost
 			}
 			chart := plot.Line_Chart {
-				label  = "Spend a day, in dollars",
+				label  = tr(m, .Spend_A_Day_Label),
 				xs     = xs,
-				series = []plot.Line_Series{{name = "Spent", ys = vals, slot = 0}},
+				series = []plot.Line_Series{{name = tr(m, .Series_Spent), ys = vals, slot = 0}},
 				x      = {kind = .Time},
 				y      = {format = {prefix = "$"}, zero = true},
 				fill   = .Area,
@@ -118,17 +120,17 @@ spend_charts :: proc(gtx: ^ui.Ctx, m: ^Model, sp: ^shapes.Spend_Result, w: []ops
 			plot.line_chart(gtx, &chart, &style)
 		}
 	}
-	pane(gtx, m, .Chart_Finds, w[1], "To finish a reply, after a find", scroll = false)
+	pane(gtx, m, .Chart_Finds, w[1], tr(m, .After_Find), scroll = false)
 	ui.inset(gtx, {16, 8, 16, 8})
 	f := &sp.finds
 	if f.hits + f.misses == 0 {
-		empty(gtx, "No finds yet", "When an agent runs brain find, what it spends finishing its reply shows here.", .Search)
+		empty(gtx, tr(m, .No_Finds), tr(m, .No_Finds_Body), .Search)
 		return
 	}
 	chart := plot.Bar_Chart {
-		label      = "Median dollars to finish a reply after a find",
-		categories = []string{fmt.tprintf("answered (%d)", f.hits), fmt.tprintf("missed (%d)", f.misses)},
-		series     = []plot.Bar_Series{{name = "Median to finish", values = []f64{f.hit_cost, f.miss_cost}, slot = 1}},
+		label      = tr(m, .After_Find_Label),
+		categories = []string{tf(m, .Answered_N, f.hits), tf(m, .Missed_N, f.misses)},
+		series     = []plot.Bar_Series{{name = tr(m, .Series_Median), values = []f64{f.hit_cost, f.miss_cost}, slot = 1}},
 		value      = {format = {prefix = "$"}, zero = true},
 	}
 	plot.bar_chart(gtx, &chart, &style)
@@ -137,10 +139,10 @@ spend_charts :: proc(gtx: ^ui.Ctx, m: ^Model, sp: ^shapes.Spend_Result, w: []ops
 // spend_models is spend by model, and a price for a model with none.
 spend_models :: proc(gtx: ^ui.Ctx, m: ^Model, sp: ^shapes.Spend_Result) {
 	s := &m.scheme
-	l := primer.action_list_open(gtx, .Full, dividers = true, name = "By model")
+	l := primer.action_list_open(gtx, .Full, dividers = true, name = tr(m, .By_Model))
 	for r in sp.by_model {
-		trailing := r.priced ? dollars(r.cost) : "no price"
-		if primer.action_list_item(&l, r.name, description = fmt.tprintf("%s tokens", compact(int(r.tokens))), description_variant = .Block, leading = r.priced ? .Graph : .Alert, trailing_text = trailing) && !r.priced {
+		trailing := r.priced ? dollars(r.cost) : tr(m, .No_Price)
+		if primer.action_list_item(&l, r.name, description = tf(m, .Tokens_N, compact(int(r.tokens), msg.locale(&m.strings))), description_variant = .Block, leading = r.priced ? .Graph : .Alert, trailing_text = trailing) && !r.priced {
 			choose(&m.pricing, r.name)
 			ui.text_set(&m.price_in, "")
 			ui.text_set(&m.price_out, "")
@@ -151,7 +153,7 @@ spend_models :: proc(gtx: ^ui.Ctx, m: ^Model, sp: ^shapes.Spend_Result) {
 	if model == "" {
 		if sp.unpriced > 0 {
 			ui.inset(gtx, {16, 8, 16, 12})
-			primer.text(gtx, "A model with no price is left out of the dollars. Choose it to set one.", .Small, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .No_Price_Note), .Small, color = s[.Fg_Color_Muted])
 		}
 		return
 	}
@@ -163,7 +165,7 @@ spend_models :: proc(gtx: ^ui.Ctx, m: ^Model, sp: ^shapes.Spend_Result) {
 price_form :: proc(gtx: ^ui.Ctx, m: ^Model, model: string) {
 	ui.inset(gtx, {16, 12, 16, 12})
 	ui.column(gtx, gap = 8, align = .Fill)
-	primer.text(gtx, fmt.tprintf("Price %s, in dollars per million tokens", model), .Small, .Medium)
+	primer.text(gtx, tf(m, .Price_Model, model), .Small, .Medium)
 	tin := strings.trim_space(ui.text_string(&m.price_in))
 	tout := strings.trim_space(ui.text_string(&m.price_out))
 	vin, iok := strconv.parse_f64(tin)
@@ -174,24 +176,24 @@ price_form :: proc(gtx: ^ui.Ctx, m: ^Model, model: string) {
 	half := max((gtx.constraints.max.x - 170) / 2, 70)
 	{
 		ui.sized(gtx, {min = {half, 0}, max = {half, ui.INF}})
-		primer.text_input(gtx, &m.price_in, placeholder = "input", size = .Small, name = "Input price")
+		primer.text_input(gtx, &m.price_in, placeholder = tr(m, .Input_Price), size = .Small, name = tr(m, .Input_Price_Name))
 	}
 	{
 		ui.sized(gtx, {min = {half, 0}, max = {half, ui.INF}})
-		primer.text_input(gtx, &m.price_out, placeholder = "output", size = .Small, name = "Output price")
+		primer.text_input(gtx, &m.price_out, placeholder = tr(m, .Output_Price), size = .Small, name = tr(m, .Output_Price_Name))
 	}
-	if primer.button(gtx, "Save", .Primary, .Small, loading = busy, inactive = !ok) && ok && !busy {
+	if primer.button(gtx, tr(m, .Save), .Primary, .Small, loading = busy, inactive = !ok) && ok && !busy {
 		send(gtx, m, .Set_Price, {model}, tin, tout)
 	}
-	if primer.button(gtx, "Cancel", .Default, .Small) {
+	if primer.button(gtx, tr(m, .Cancel), .Default, .Small) {
 		m.pricing.len = 0
 	}
 }
 
 // dollars is d as money at a glance: $2,456, $27.34, $0.20.
-dollars :: proc(d: f64) -> string {
+dollars :: proc(d: f64, locale := i18n.Locale.English) -> string {
 	if d >= 100 {
-		return fmt.tprintf("$%s", thousands(int(math.round(d))))
+		return fmt.tprintf("$%s", thousands(int(math.round(d)), locale))
 	}
 	return fmt.tprintf("$%.2f", d)
 }

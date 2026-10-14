@@ -1,12 +1,16 @@
 package desk_view
 
 import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:testing"
 
+import "jm:i18n"
+import "jm:path"
 import "jm:ui"
 import "jm:ui/ops"
 
+import "../../../msg"
 import "../shapes"
 
 @(private = "file")
@@ -1059,4 +1063,39 @@ a_new_machine_is_set_up_from_setup :: proc(t: ^testing.T) {
 	ui.text_set(&m.try, "how do the tests run")
 	ui.probe_frame(&p)
 	testing.expect(t, ui.probe_needs_q(&p, shapes.Find{terms = "how do the tests run"}), "a first find")
+}
+
+// The globe lists every shipped language in its own name. Choosing one
+// changes the page, and the next start reads that tag back.
+@(test)
+the_globe_lists_every_language_and_keeps_the_choice :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	dir, err := path.temp_dir("desk-locale-")
+	testing.expect_value(t, err, nil)
+	defer {
+		os.remove_all(dir)
+		delete(dir)
+	}
+	m: Model
+	model_init(&m)
+	m.language_dir = dir
+	m.page = .Activity
+	defer model_destroy(&m)
+	p: ui.Probe
+	ui.probe_init(&p, view, &m, {1280, 1800})
+	defer ui.probe_destroy(&p)
+	testing.expect(t, ui.probe_click(&p, "English"), "the globe")
+	ui.probe_advance(&p, 30, 0.02)
+	for locale in i18n.Locale {
+		if !msg.shipped(locale) do continue
+		_, found := ui.probe_find(&p, i18n.locale_name(locale))
+		testing.expectf(t, found, "%s is not in the menu", i18n.locale_name(locale))
+	}
+	testing.expect(t, ui.probe_click(&p, "Deutsch"), "choose German")
+	ui.probe_frame(&p)
+	_, title := ui.probe_find(&p, "Aktivität")
+	testing.expect(t, title, "the page title in German")
+	_, named := ui.probe_find(&p, "Deutsch")
+	testing.expect(t, named, "the globe names the language")
+	testing.expect_value(t, msg.startup_locale(dir, {"fr_FR.UTF-8"}), i18n.Locale.German)
 }

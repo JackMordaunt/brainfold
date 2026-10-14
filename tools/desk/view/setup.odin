@@ -1,6 +1,5 @@
 package desk_view
 
-import "core:fmt"
 import "core:strings"
 
 import "jm:ui"
@@ -8,6 +7,7 @@ import "jm:ui/base"
 import "jm:ui/ops"
 import "jm:ui/primer"
 
+import "../../../msg"
 import "../shapes"
 
 // --- Setup ------------------------------------------------------------------------
@@ -72,12 +72,12 @@ Setup_Step :: enum u8 {
 	Try,
 }
 
-SETUP_STEP_TITLES := [Setup_Step]string {
-	.Vault    = "A vault",
-	.Agents   = "Your agents",
-	.Memories = "Your agents' memories",
-	.Sync     = "Your other machines",
-	.Try      = "Try it",
+SETUP_STEP_MSG := [Setup_Step]msg.Msg {
+	.Vault    = .Step_Vault,
+	.Agents   = .Step_Agents,
+	.Memories = .Step_Memories,
+	.Sync     = .Step_Sync,
+	.Try      = .Step_Try,
 }
 
 // step_done is whether a step is done.
@@ -148,7 +148,7 @@ page_setup :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		m,
 		.Setup_Step,
 		w[1],
-		SETUP_STEP_TITLES[step],
+		tr(m, SETUP_STEP_MSG[step]),
 		bar = step == .Try && r.vault.exists ? try_bar : nil,
 		scroll = scroll,
 		footer = footer,
@@ -177,7 +177,7 @@ setup_steps :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result, st: ui.Sta
 		loading(gtx, 6)
 		return
 	}
-	if failed(gtx, r.error) {
+	if failed(gtx, m, r.error) {
 		return
 	}
 	s := &m.scheme
@@ -187,17 +187,17 @@ setup_steps :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result, st: ui.Sta
 		ui.column(gtx, gap = 8, align = .Fill)
 		primer.heading(
 			gtx,
-			left == 0 ? "Your vault is working" : "Get your vault working",
+			left == 0 ? tr(m, .Vault_Working) : tr(m, .Vault_Get_Working),
 			3,
 			.Small,
 		)
 		primer.text(
 			gtx,
-			left == 0 ? "Every step that matters is done. The rest is optional." : fmt.tprintf("%d of 3 steps left. Each is a click or two.", left),
+			left == 0 ? tr(m, .Setup_Done) : tf(m, .Steps_Left, left),
 			.Small,
 			color = s[.Fg_Color_Muted],
 		)
-		primer.progress_bar(gtx, f32(3 - left) / 3 * 100, label = "Setup")
+		primer.progress_bar(gtx, f32(3 - left) / 3 * 100, label = tr(m, .Page_Setup))
 	}
 	base.divider(gtx, s[.Border_Color_Muted], key = 1)
 	shown := setup_shown(gtx, m, r)
@@ -206,13 +206,13 @@ setup_steps :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result, st: ui.Sta
 	for step in Setup_Step {
 		if step == .Sync {
 			ui.inset(gtx, {8, 12, 8, 4}, key = 0x0b7)
-			primer.text(gtx, "Optional", .Small, .Medium, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .Optional), .Small, .Medium, color = s[.Fg_Color_Muted])
 		}
 		ui.scope(gtx, u64(step) + 1)
 		done := step_done(gtx, r, step)
 		if row_button(
 			gtx,
-			SETUP_STEP_TITLES[step],
+			tr(m, SETUP_STEP_MSG[step]),
 			step == shown,
 			done ? .Check_Circle_Fill : .Circle,
 		) {
@@ -229,11 +229,11 @@ setup_vault :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result) {
 	v := r.vault
 	primer.text(
 		gtx,
-		"A folder of markdown you own: your agents' memory. Make a new one, or use one you have.",
+		tr(m, .Step_Vault_Body),
 		color = s[.Fg_Color_Muted],
 	)
 	if v.exists {
-		fields(gtx, {{"folder", v.path}, {"bullets", thousands(v.bullets)}})
+		fields(gtx, {{tr(m, .Label_Folder), v.path}, {tr(m, .Label_Bullets), digits(m, v.bullets)}})
 	}
 }
 
@@ -250,12 +250,12 @@ vault_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	if !v.exists {
 		tip := ui.stack_open(gtx, key = 1)
 		defer ui.close(&tip)
-		if primer.button(gtx, "Create", .Primary, leading = .Plus, loading = making) && !making {
+		if primer.button(gtx, tr(m, .Create), .Primary, leading = .Plus, loading = making) && !making {
 			ui.pick_folder(gtx, VAULT_NEW_PICK)
 		}
 		primer.tooltip(
 			gtx,
-			"Make a new vault in a folder you pick.",
+			tr(m, .Create_Tip),
 			ui.last_widget(gtx),
 			delay = TOOLTIP_DELAY,
 		)
@@ -264,7 +264,7 @@ vault_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	defer ui.close(&tip)
 	if primer.button(
 		   gtx,
-		   v.exists ? "Change" : "Open",
+		   v.exists ? tr(m, .Change) : tr(m, .Open),
 		   .Default,
 		   leading = .File_Directory,
 		   inactive = making,
@@ -274,7 +274,7 @@ vault_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	}
 	primer.tooltip(
 		gtx,
-		v.exists ? "Use another vault, in a folder you pick: its notes answer every agent from then on." : "Use a vault you already have, in a folder you pick.",
+		v.exists ? tr(m, .Use_Another) : tr(m, .Use_Existing),
 		ui.last_widget(gtx),
 		delay = TOOLTIP_DELAY,
 	)
@@ -298,33 +298,33 @@ setup_agents :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result) {
 	s := &m.scheme
 	primer.text(
 		gtx,
-		"Connected, an agent is given the vault as it works and can propose what it learns; its transcripts are read on this machine, for recall and savings, and never leave it.",
+		tr(m, .Connected_Body),
 		color = s[.Fg_Color_Muted],
 	)
 	if !r.vault.exists {
-		primer.inline_message(gtx, "Connect once there is a vault.", .Warning, .Small)
+		primer.inline_message(gtx, tr(m, .Connect_First), .Warning, .Small)
 	}
 	ui.column(gtx, gap = 8, align = .Fill)
 	for a, i in r.agents {
 		ui.row(gtx, gap = 10, align = .Center, key = u64(i + 1))
-		name := agent_name(a.name)
+		name := agent_name(m, a.name)
 		primer.text(gtx, name, .Medium, .Medium)
 		ui.fill_space(gtx)
 		switch {
 		case !a.installed:
-			primer.text(gtx, "not on this machine", .Small, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .Not_On_Machine), .Small, color = s[.Fg_Color_Muted])
 		case a.hooks && a.reading:
-			primer.state_label(gtx, "Connected", .Open, .Small)
+			primer.state_label(gtx, tr(m, .Connected), .Open, .Small)
 		case:
 			busy := waiting_on(m, .Connect, a.name)
 			if primer.button(
 				   gtx,
-				   "Connect",
+				   tr(m, .Connect),
 				   .Primary,
 				   .Small,
 				   loading = busy,
 				   inactive = !r.vault.exists,
-				   name = fmt.tprintf("Connect %s", name),
+				   name = tf(m, .Connect_Name, name),
 			   ) &&
 			   !busy &&
 			   r.vault.exists {
@@ -335,10 +335,10 @@ setup_agents :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result) {
 }
 
 // agent_name is an agent brain serves as its maker names it.
-agent_name :: proc(name: string) -> string {
+agent_name :: proc(m: ^Model, name: string) -> string {
 	switch name {
 	case "claude":
-		return "Claude Code"
+		return tr(m, .Claude_Code)
 	}
 	return name
 }
@@ -348,13 +348,12 @@ agent_name :: proc(name: string) -> string {
 setup_memories :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result) {
 	s := &m.scheme
 	mem := r.memories
-	note := "What your agents remembered on their own is in the vault."
+	note := tr(m, .Memories_In)
 	if mem.new > 0 {
-		note = fmt.tprintf(
-			"%s your agents kept on their own %s not in the vault yet. Each comes in as a proposal for you to approve.",
-			mem.new == 1 ? "1 memory" : fmt.tprintf("%d memories", mem.new),
-			mem.new == 1 ? "is" : "are",
-		)
+		// {0} is the phrase ("1 memory"), and the form follows the count.
+		phrase := tf(m, .Memory_Word, mem.new)
+		template := msg.form(&m.strings, .Memories_Out, mem.new)
+		note, _ = strings.replace_all(template, "{0}", phrase, context.temp_allocator)
 	}
 	primer.text(gtx, note, color = s[.Fg_Color_Muted])
 }
@@ -371,12 +370,12 @@ memories_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	tip := ui.stack_open(gtx)
 	defer ui.close(&tip)
 	busy := waiting_on(m, .Import)
-	if primer.button(gtx, "Import", .Primary, leading = .Download, loading = busy) && !busy {
+	if primer.button(gtx, tr(m, .Import), .Primary, leading = .Download, loading = busy) && !busy {
 		open_import(m)
 	}
 	primer.tooltip(
 		gtx,
-		n == 1 ? "Bring in the 1 memory your agents kept on their own, as a proposal to approve." : fmt.tprintf("Bring in the %d memories your agents kept on their own, each as a proposal to approve.", n),
+		tf(m, .Bring_Memories, n),
 		ui.last_widget(gtx),
 		delay = TOOLTIP_DELAY,
 	)
@@ -387,9 +386,9 @@ memories_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 setup_sync :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result) {
 	s := &m.scheme
 	v, st := ui.need(gtx, shapes.Vault{}, shapes.Vault_Result)
-	note := "Use the vault on your other machines: every change here is sent there, and theirs come back."
+	note := tr(m, .Sync_Body)
 	if step_done(gtx, r, .Sync) {
-		note = fmt.tprintf("On, with %s.", ready(st) ? v.remote : "")
+		note = tf(m, .Sync_On_With, ready(st) ? v.remote : "")
 	}
 	primer.text(gtx, note, color = s[.Fg_Color_Muted])
 }
@@ -398,7 +397,7 @@ setup_sync :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result) {
 @(private = "file")
 sync_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	ui.row(gtx, align = .Center)
-	if fix_button(gtx, "Sync", "Set up sync on the Vault page: name where the vault is kept, and every machine that uses it stays the same.", .Default, .Sync) {
+	if fix_button(gtx, tr(m, .Sync), tr(m, .Sync_Setup_Tip), .Default, .Sync) {
 		go(m, .Vault)
 	}
 }
@@ -409,10 +408,10 @@ try_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	primer.text_input(
 		gtx,
 		&m.try,
-		placeholder = "how do I run the tests",
+		placeholder = tr(m, .Try_Query),
 		leading = .Search,
 		block = true,
-		name = "Ask the vault",
+		name = tr(m, .Ask_Vault),
 	)
 }
 
@@ -420,16 +419,13 @@ try_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 @(private = "file")
 setup_try :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result) {
 	s := &m.scheme
-	note := "Ask what an agent would ask, and see what the vault tells it."
+	note := tr(m, .Try_Body)
 	if r.lookups > 0 {
-		note = fmt.tprintf(
-			"Your agents have asked %s times. Ask what one would, and see what it is told.",
-			thousands(r.lookups),
-		)
+		note = tf(m, .Asked_Times, r.lookups)
 	}
 	primer.text(gtx, note, color = s[.Fg_Color_Muted])
 	if !r.vault.exists {
-		primer.inline_message(gtx, "Make or choose a vault first.", .Warning, .Small)
+		primer.inline_message(gtx, tr(m, .Vault_First), .Warning, .Small)
 		return
 	}
 	terms := strings.trim_space(ui.text_string(&m.try))
@@ -445,7 +441,7 @@ setup_try :: proc(gtx: ^ui.Ctx, m: ^Model, r: ^shapes.Setup_Result) {
 	case len(f.hits) == 0:
 		primer.text(
 			gtx,
-			"Nothing in the vault for that yet. An agent asking it would be told so, and it would show under Misses.",
+			tr(m, .Try_Miss),
 			.Small,
 			color = s[.Fg_Color_Muted],
 		)

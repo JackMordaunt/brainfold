@@ -20,8 +20,8 @@ PROVENANCE_CHART :: 120 // the serves-a-day chart's height
 // bullet_tabs switches the bullet shown between editing it and its
 // provenance, fixed over the pane.
 bullet_tabs :: proc(gtx: ^ui.Ctx, m: ^Model) {
-	segments := []primer.Segment{{label = "Edit", icon = .Pencil}, {label = "Provenance", icon = .History}}
-	primer.segmented_control(gtx, segments, &m.bullet_tab, "Bullet view", size = .Small)
+	segments := []primer.Segment{{label = tr(m, .Edit), icon = .Pencil}, {label = tr(m, .Provenance), icon = .History}}
+	primer.segmented_control(gtx, segments, &m.bullet_tab, tr(m, .Bullet_View), size = .Small)
 }
 
 // provenance is the bullet b's story: what it was served, and where it
@@ -36,17 +36,17 @@ provenance :: proc(gtx: ^ui.Ctx, m: ^Model, b: shapes.Bullet) {
 		loading(gtx, 4)
 		return
 	}
-	if failed(gtx, p.error) {
+	if failed(gtx, m, p.error) {
 		return
 	}
 	w := room.x - 32
 	sv := &p.served
 	// What it was served: fixed figures and a chart, a known quantity.
 	figures := make([dynamic][3]string, context.temp_allocator)
-	append(&figures, [3]string{"Usage", thousands(sv.times), fmt.tprintf("in %s sessions", thousands(sv.sessions))})
-	append(&figures, [3]string{"Last served", sv.last != "" ? age(days_since(sv.last), ago = true) : "never", sv.first != "" ? fmt.tprintf("first %s", sv.first[:min(10, len(sv.first))]) : "no query has found it"})
+	append(&figures, [3]string{tr(m, .Usage), digits(m, sv.times), tf(m, .In_Sessions, sv.sessions)})
+	append(&figures, [3]string{tr(m, .Last_Served), sv.last != "" ? age(m, days_since(sv.last), ago = true) : tr(m, .Word_Never), sv.first != "" ? tf(m, .First_Served, sv.first[:min(10, len(sv.first))]) : tr(m, .Never_Served)})
 	if w >= 480 {
-		append(&figures, [3]string{"First answer", thousands(sv.top), fmt.tprintf("of %s serves", thousands(sv.times))})
+		append(&figures, [3]string{tr(m, .First_Answer), digits(m, sv.top), tf(m, .Of_Serves, sv.times)})
 	}
 	stats(gtx, w, figures[:], compact = true)
 	{
@@ -61,7 +61,7 @@ provenance :: proc(gtx: ^ui.Ctx, m: ^Model, b: shapes.Bullet) {
 	origin(gtx, m, p, b)
 	if len(sv.queries) > 0 {
 		ui.column(gtx, gap = 4, align = .Fill, key = 2)
-		section(gtx, "Found by")
+		section(gtx, tr(m, .Found_By))
 		for q, i in sv.queries {
 			ui.row(gtx, gap = 8, align = .Center, key = u64(i + 1))
 			{
@@ -69,13 +69,13 @@ provenance :: proc(gtx: ^ui.Ctx, m: ^Model, b: shapes.Bullet) {
 				primer.text(gtx, q.query, .Small)
 			}
 			ui.fill_space(gtx)
-			primer.text(gtx, fmt.tprintf("%d×", q.times), .Small, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tf(m, .Times, q.times), .Small, color = s[.Fg_Color_Muted])
 		}
 		callers := make([dynamic]string, context.temp_allocator)
 		for c in sv.callers {
-			append(&callers, fmt.tprintf("%s %d", c.caller, c.times))
+			append(&callers, fmt.tprintf("%s %s", c.caller, digits(m, c.times)))
 		}
-		primer.text(gtx, fmt.tprintf("served to %s", strings.join(callers[:], ", ", context.temp_allocator)), .Small, color = s[.Fg_Color_Muted], key = 99)
+		primer.text(gtx, tf(m, .Served_To, strings.join(callers[:], ", ", context.temp_allocator)), .Small, color = s[.Fg_Color_Muted], key = 99)
 	}
 	claims(gtx, m, p.claims)
 	history(gtx, m, p.history)
@@ -89,7 +89,7 @@ section :: proc(gtx: ^ui.Ctx, title: string) {
 // serves_chart is the bullet's serves a day, the last 30 days.
 serves_chart :: proc(gtx: ^ui.Ctx, m: ^Model, days: []shapes.Day_Count) {
 	if len(days) == 0 {
-		empty(gtx, "Not served lately", "No query returned it in the last 30 days.", .Graph)
+		empty(gtx, tr(m, .Not_Served_Lately), tr(m, .Not_Served_Body), .Graph)
 		return
 	}
 	style := plot_primer.style(gtx)
@@ -100,9 +100,9 @@ serves_chart :: proc(gtx: ^ui.Ctx, m: ^Model, days: []shapes.Day_Count) {
 		values[i] = f64(d.times)
 	}
 	chart := plot.Bar_Chart {
-		label      = "Serves a day",
+		label      = tr(m, .Serves_A_Day),
 		categories = cats,
-		series     = []plot.Bar_Series{{name = "Serves", values = values, slot = 0}},
+		series     = []plot.Bar_Series{{name = tr(m, .Serves), values = values, slot = 0}},
 	}
 	plot.bar_chart(gtx, &chart, &style)
 }
@@ -112,26 +112,26 @@ serves_chart :: proc(gtx: ^ui.Ctx, m: ^Model, days: []shapes.Day_Count) {
 origin :: proc(gtx: ^ui.Ctx, m: ^Model, p: ^shapes.Bullet_Show_Result, b: shapes.Bullet) {
 	s := &m.scheme
 	ui.column(gtx, gap = 8, align = .Fill, key = 1)
-	section(gtx, "Where it came from")
+	section(gtx, tr(m, .Where_From))
 	if p.proposed.session == "" {
-		said := b.source != "" ? fmt.tprintf("Its source says: %s.", b.source) : "It names no source."
-		primer.text(gtx, fmt.tprintf("%s No agent transcript on this machine proposed it: it was written by hand, or on another machine.", said), .Small, color = s[.Fg_Color_Muted])
+		said := b.source != "" ? tf(m, .Source_Says, b.source) : tr(m, .No_Source)
+		primer.text(gtx, tf(m, .No_Transcript_Written, said), .Small, color = s[.Fg_Color_Muted])
 		return
 	}
 	pr := &p.proposed
 	card := boxed(gtx, 12)
 	defer ui.close(&card)
 	ui.column(gtx, gap = 8, align = .Fill)
-	primer.text(gtx, pr.title != "" ? pr.title : "Untitled session", .Medium, .Semibold)
+	primer.text(gtx, pr.title != "" ? pr.title : tr(m, .Untitled_Session), .Medium, .Semibold)
 	when_ := len(pr.ts) >= 16 ? fmt.tprintf("%s %s", pr.ts[:10], pr.ts[11:16]) : pr.ts
-	primer.text(gtx, fmt.tprintf("Proposed by %s, %s", pr.agent != "" ? pr.agent : "an agent", when_), .Small, color = s[.Fg_Color_Muted])
+	primer.text(gtx, tf(m, .Proposed_By, pr.agent != "" ? pr.agent : tr(m, .An_Agent), when_), .Small, color = s[.Fg_Color_Muted])
 	ui.row(gtx, align = .Center)
 	st := ui.stack_open(gtx)
 	defer ui.close(&st)
-	if primer.button(gtx, "Read", .Default, .Small, leading = .Comment_Discussion) {
+	if primer.button(gtx, tr(m, .Read), .Default, .Small, leading = .Comment_Discussion) {
 		read_conversation(m, b.handle, pr.turn)
 	}
-	primer.tooltip(gtx, "Read the conversation that proposed it, in Recall.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+	primer.tooltip(gtx, tr(m, .Read_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 }
 
 // read_conversation opens Recall on the conversation around turn, kept
@@ -149,9 +149,9 @@ read_conversation :: proc(m: ^Model, handle, turn: string) {
 claims :: proc(gtx: ^ui.Ctx, m: ^Model, cs: []shapes.Claim) {
 	s := &m.scheme
 	ui.column(gtx, gap = 6, align = .Fill, key = 3)
-	section(gtx, "Its claims")
+	section(gtx, tr(m, .Its_Claims))
 	if len(cs) == 0 {
-		primer.text(gtx, "It names nothing brain verify can check: no path, file, command or commit.", .Small, color = s[.Fg_Color_Muted])
+		primer.text(gtx, tr(m, .No_Claims), .Small, color = s[.Fg_Color_Muted])
 		return
 	}
 	for c, i in cs {
@@ -169,14 +169,14 @@ claims :: proc(gtx: ^ui.Ctx, m: ^Model, cs: []shapes.Claim) {
 history :: proc(gtx: ^ui.Ctx, m: ^Model, cs: []shapes.Change) {
 	s := &m.scheme
 	ui.column(gtx, gap = 6, align = .Fill, key = 4)
-	section(gtx, "Its history")
+	section(gtx, tr(m, .Its_History))
 	if len(cs) == 0 {
-		primer.text(gtx, "The vault has no history of it: it is not a git repository, or the bullet is not yet committed.", .Small, color = s[.Fg_Color_Muted])
+		primer.text(gtx, tr(m, .No_History), .Small, color = s[.Fg_Color_Muted])
 		return
 	}
 	for c, i in cs {
 		ui.column(gtx, gap = 2, align = .Fill, key = u64(i + 1))
-		primer.text(gtx, fmt.tprintf("%s · %s", c.date, c.subject), .Small)
-		primer.text(gtx, fmt.tprintf("%s · %s", c.commit, strings.join(c.files, ", ", context.temp_allocator)), .Small, color = s[.Fg_Color_Muted], key = 1)
+		primer.text(gtx, tf(m, .Join_Dot, c.date, c.subject), .Small)
+		primer.text(gtx, tf(m, .Join_Dot, c.commit, strings.join(c.files, ", ", context.temp_allocator)), .Small, color = s[.Fg_Color_Muted], key = 1)
 	}
 }

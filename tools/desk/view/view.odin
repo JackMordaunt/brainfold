@@ -22,6 +22,7 @@ import "core:mem"
 import "core:strconv"
 import "core:strings"
 
+import "jm:i18n"
 import "jm:ui"
 import "jm:ui/base"
 import "jm:ui/design"
@@ -29,6 +30,7 @@ import "jm:ui/ops"
 import "jm:ui/primer"
 import tok "jm:ui/primer/tokens"
 
+import "../../../msg"
 import "../shapes"
 
 NAV_WIDTH :: 248 // the rail's width until it is dragged
@@ -88,6 +90,32 @@ PAGE_NOTES := [Page]string {
 	.Doctor   = "What is stale, thin, oversized, orphaned, or no longer true.",
 	.Vault    = "Where the vault lives, and how it travels between machines.",
 	.Setup    = "Get the vault working on this machine, a step at a time.",
+}
+
+// PAGE_MSG and PAGE_NOTE are the titles and notes as the catalog names
+// them. PAGE_TITLES stays the English -page flag.
+PAGE_MSG := [Page]msg.Msg {
+	.Activity = .Page_Activity,
+	.Savings  = .Page_Savings,
+	.Misses   = .Page_Misses,
+	.Recall   = .Page_Recall,
+	.Inbox    = .Page_Inbox,
+	.Bullets  = .Page_Bullets,
+	.Doctor   = .Page_Doctor,
+	.Vault    = .Page_Vault,
+	.Setup    = .Page_Setup,
+}
+
+PAGE_NOTE := [Page]msg.Msg {
+	.Activity = .Note_Activity,
+	.Savings  = .Note_Savings,
+	.Misses   = .Note_Misses,
+	.Recall   = .Note_Recall,
+	.Inbox    = .Note_Inbox,
+	.Bullets  = .Note_Bullets,
+	.Doctor   = .Note_Doctor,
+	.Vault    = .Note_Vault,
+	.Setup    = .Note_Setup,
 }
 
 PAGE_ICONS := [Page]primer.Icon {
@@ -229,10 +257,15 @@ Model :: struct {
 	setup_chosen: bool, // the person chose a step, rather than the first not done
 	try:       ui.Text_State, // Setup's first find
 	allocator: mem.Allocator,
+	strings:   msg.Strings, // the catalog in the locale in use
+	language_open: bool, // the globe's menu
+	language_dir: string, // where a choice is saved; empty in a test
 }
 
-// model_init readies m. The toasts' memory is allocator's.
-model_init :: proc(m: ^Model, allocator := context.allocator) {
+// model_init readies m in locale. The toasts' memory is allocator's.
+// A test leaves locale at English and language_dir empty, so it neither
+// reads nor writes a person's saved tag.
+model_init :: proc(m: ^Model, allocator := context.allocator, locale := i18n.Locale.English) {
 	m.allocator = allocator
 	m.toasts.allocator = allocator
 	m.search.buf = make([dynamic]u8, allocator)
@@ -249,6 +282,27 @@ model_init :: proc(m: ^Model, allocator := context.allocator) {
 	editor_init(&m.editor, allocator)
 	m.selected = make([dynamic]string, allocator)
 	m.history.places = make([dynamic]Place, allocator)
+	msg.init(&m.strings, locale)
+}
+
+// tr is key in the locale m is showing.
+tr :: proc(m: ^Model, key: msg.Msg) -> string {
+	return msg.tr(&m.strings, key)
+}
+
+// tf is key with its arguments filled in.
+tf :: proc(m: ^Model, key: msg.Msg, args: ..i18n.Arg) -> string {
+	return msg.trf(&m.strings, key, ..args)
+}
+
+// choose_language puts locale in use and, when a directory was given,
+// saves the tag for the next desk start and the CLI.
+choose_language :: proc(m: ^Model, locale: i18n.Locale) {
+	msg.use(&m.strings, locale)
+	msg.use_global(locale)
+	if m.language_dir != "" {
+		msg.save_tag(m.language_dir, locale)
+	}
 }
 
 model_destroy :: proc(m: ^Model) {
@@ -455,7 +509,7 @@ nav :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	fresh: [Page]bool
 	for p in Page {
 		if waiting[p] > 0 {
-			counts[p] = fmt.tprint(waiting[p])
+			counts[p] = digits(m, waiting[p])
 		}
 		if p == m.page || waiting[p] < m.seen[p] {
 			m.seen[p] = waiting[p]
@@ -463,7 +517,7 @@ nav :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		fresh[p] = waiting[p] > m.seen[p]
 	}
 	if rail_collapsed(m) {
-		rail(gtx, m, counts, fresh)
+		rail(gtx, m, waiting, fresh)
 		return
 	}
 	nav_edge(gtx, m, w, h)
@@ -472,9 +526,9 @@ nav :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		ui.inset(gtx, {16, 20, 8, 4})
 		ui.row(gtx, gap = 8, align = .Center)
 		mark(gtx, 36, s[.Fg_Color_Default])
-		primer.heading(gtx, "brainfold", 3, .Small)
+		primer.heading(gtx, tr(m, .App_Name), 3, .Small)
 		ui.fill_space(gtx)
-		if icon_action(gtx, .Sidebar_Collapse, "Collapse the sidebar", .Invisible, .Small) {
+		if icon_action(gtx, .Sidebar_Collapse, tr(m, .Collapse_Sidebar), .Invisible, .Small) {
 			m.collapsed = true
 		}
 	}
@@ -482,7 +536,7 @@ nav :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	tend := make([]primer.Nav_Item, len(Page) - WATCH_PAGES, context.temp_allocator)
 	for p in Page {
 		it := primer.Nav_Item {
-			label         = PAGE_TITLES[p],
+			label         = tr(m, PAGE_MSG[p]),
 			leading       = PAGE_ICONS[p],
 			trailing_text = counts[p],
 			current       = p == m.page,
@@ -493,37 +547,50 @@ nav :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			tend[int(p) - WATCH_PAGES] = it
 		}
 	}
-	groups := []primer.Nav_Group{{title = "Watch", items = watch}, {title = "Tend", items = tend}}
-	if it := primer.nav_list(gtx, groups, label = "Pages"); it != nil {
-		for title, p in PAGE_TITLES {
-			if title == it.label {
-				go(m, p)
+	groups := []primer.Nav_Group{{title = tr(m, .Nav_Watch), items = watch}, {title = tr(m, .Nav_Tend), items = tend}}
+	if it := primer.nav_list(gtx, groups, label = tr(m, .Nav_Pages)); it != nil {
+		for &item, i in watch {
+			if it == &item {
+				go(m, Page(i))
 			}
 		}
+		for &item, i in tend {
+			if it == &item {
+				go(m, Page(i + WATCH_PAGES))
+			}
+		}
+	}
+	// The globe sits under the pages, so the title row stays the height
+	// the panes were laid out against.
+	{
+		ui.inset(gtx, {12, 4, 12, 12})
+		language_menu(gtx, m)
 	}
 }
 
 // rail is the collapsed rail: the mark, then a button per page with its
 // name as a tooltip and a dot when something waits on it. Expanding it is
 // offered only when the person collapsed it; a narrow window keeps it so.
-rail :: proc(gtx: ^ui.Ctx, m: ^Model, counts: [Page]string, fresh: [Page]bool) {
+rail :: proc(gtx: ^ui.Ctx, m: ^Model, waiting: [Page]int, fresh: [Page]bool) {
 	s := &m.scheme
 	ui.column(gtx, gap = 6, align = .Center)
 	ui.spacer(gtx, 18)
 	mark(gtx, 32, s[.Fg_Color_Default])
 	ui.spacer(gtx, 10)
 	for p in Page {
-		desc := counts[p] != "" ? fmt.tprintf("%s waiting", counts[p]) : ""
-		if icon_action(gtx, PAGE_ICONS[p], PAGE_TITLES[p], p == m.page ? .Default : .Invisible, dot = fresh[p] ? .Button : .None, description = desc, direction = .E, key = u64(p) + 1) {
+		desc := waiting[p] > 0 ? tf(m, .Waiting, waiting[p]) : ""
+		if icon_action(gtx, PAGE_ICONS[p], tr(m, PAGE_MSG[p]), p == m.page ? .Default : .Invisible, dot = fresh[p] ? .Button : .None, description = desc, direction = .E, key = u64(p) + 1) {
 			go(m, p)
 		}
 	}
 	if m.collapsed && m.window.x - open_width(m) - 2 * gutter(m) >= RAIL_BODY {
 		ui.spacer(gtx, 10)
-		if icon_action(gtx, .Sidebar_Expand, "Expand the sidebar", .Invisible, .Small, direction = .E, key = 99) {
+		if icon_action(gtx, .Sidebar_Expand, tr(m, .Expand_Sidebar), .Invisible, .Small, direction = .E, key = 99) {
 			m.collapsed = false
 		}
 	}
+	ui.spacer(gtx, 10)
+	language_menu(gtx, m, icon_only = true)
 }
 
 // nav_edge is the rail's right edge as a handle: dragging it sets the
@@ -531,7 +598,7 @@ rail :: proc(gtx: ^ui.Ctx, m: ^Model, counts: [Page]string, fresh: [Page]bool) {
 nav_edge :: proc(gtx: ^ui.Ctx, m: ^Model, w, h: f32) {
 	id := ui.claim_id(gtx, 0xed6e)
 	ops.input_area(gtx.scene, id, ops.Rect{w - 4, 0, 8, h}, {.Press, .Release, .Move}, .Resize_EW)
-	ops.tag(gtx.scene, id, "Resize the sidebar")
+	ops.tag(gtx.scene, id, tr(m, .Resize_Sidebar))
 	for e in ui.events(gtx, id) {
 		#partial switch e.kind {
 		case .Press:
@@ -551,7 +618,8 @@ nav_edge :: proc(gtx: ^ui.Ctx, m: ^Model, w, h: f32) {
 }
 
 // header is the page's title and what it is for, with the actions every
-// page shares: sync now, and light or dark.
+// page shares: sync now, and light or dark. The language control is on
+// the rail, so this row stays the height the panes were measured against.
 header :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	s := &m.scheme
 	ui.inset(gtx, {gutter(m), 20, gutter(m) - 8, 12})
@@ -576,8 +644,8 @@ header :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		w := body_width(m) - 120 - controls
 		ui.sized(gtx, {min = {w, 0}, max = {w, ui.INF}})
 		ui.column(gtx, gap = 4, align = .Fill)
-		primer.heading(gtx, PAGE_TITLES[m.page], 1, .Medium)
-		primer.text(gtx, PAGE_NOTES[m.page], color = s[.Fg_Color_Muted])
+		primer.heading(gtx, tr(m, PAGE_MSG[m.page]), 1, .Medium)
+		primer.text(gtx, tr(m, PAGE_NOTE[m.page]), color = s[.Fg_Color_Muted])
 	}
 	ui.fill_space(gtx)
 	#partial switch m.page {
@@ -599,13 +667,43 @@ header :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	}
 	// An icon button's tooltip is its name and description.
 	syncing := waiting_on(m, .Sync)
-	if icon_action(gtx, .Sync, "Sync now", loading = syncing, description = "Send what changed on this machine to your other machines, and take in what they wrote. It also runs on its own when an agent session starts and stops.") && !syncing {
+	if icon_action(gtx, .Sync, tr(m, .Sync_Now), loading = syncing, description = tr(m, .Sync_Now_Tip)) && !syncing {
 		send(gtx, m, .Sync)
 	}
 	dark := primer.mode_of(m.theme) == .Dark
-	if icon_action(gtx, dark ? .Sun : .Moon, dark ? "Light theme" : "Dark theme", .Invisible, description = "Switch the desk between light and dark.") {
+	if icon_action(gtx, dark ? .Sun : .Moon, tr(m, dark ? .Light_Theme : .Dark_Theme), .Invisible, description = tr(m, .Theme_Tip)) {
 		m.theme = dark ? .Light : .Dark
 	}
+}
+
+// language_menu is the globe: the language in use, in its own name, and
+// every shipped locale the same way. Choosing one reloads the table and
+// saves the tag. The layout stays left to right. On the collapsed rail
+// the button is the icon alone; its name is still the endonym.
+language_menu :: proc(gtx: ^ui.Ctx, m: ^Model, icon_only := false) {
+	current := msg.locale(&m.strings)
+	ui.stack(gtx, key = 0x6c61)
+	side := primer.Anchor_Side.Outside_Bottom
+	if icon_only {
+		side = .Outside_Right
+		if icon_action(gtx, .Globe, i18n.locale_name(current), .Invisible, direction = .E, key = 1) {
+			m.language_open = !m.language_open
+		}
+	} else {
+		primer.action_menu_button(gtx, i18n.locale_name(current), &m.language_open, .Globe, .Invisible, .Small, key = 1)
+	}
+	menu := primer.action_menu_open(gtx, &m.language_open, ui.last_widget(gtx), selection = .Single, side = side, align = .Start, name = tr(m, .Language), key = 2)
+	if primer.action_menu_group(&menu, tr(m, .Language_Menu_Title)) {
+		for locale in i18n.Locale {
+			if !msg.shipped(locale) {
+				continue
+			}
+			if primer.action_menu_item(&menu, i18n.locale_name(locale), description = i18n.locale_english(locale), selected = locale == current) {
+				choose_language(m, locale)
+			}
+		}
+	}
+	primer.action_menu_close(&menu)
 }
 
 // toolbar is the page's controls, fixed under its title: what the page
@@ -662,7 +760,7 @@ pane :: proc(gtx: ^ui.Ctx, m: ^Model, id: Pane_Id, size: ops.Size, title := "", 
 			ui.row(gtx, gap = 8, align = .Center)
 			primer.heading(gtx, title, 3, .Small)
 			if count >= 0 {
-				primer.counter_label(gtx, fmt.tprint(count))
+				primer.counter_label(gtx, digits(m, count))
 			}
 		}
 		used += ui.last_widget(gtx).size.y
@@ -792,7 +890,7 @@ fit :: proc(gtx: ^ui.Ctx, s: string, width: f32) -> string {
 // about; arg is a review mode or an alias.
 send :: proc(gtx: ^ui.Ctx, m: ^Model, kind: Pending_Kind, handles: []string = nil, arg := "", arg2 := "") {
 	if m.n_pending == MAX_PENDING {
-		primer.toast_push(&m.toasts, "Too much at once; wait for what is running.", .Warning)
+		primer.toast_push(&m.toasts, tr(m, .Too_Much), .Warning)
 		return
 	}
 	m.next_id += 1
@@ -943,11 +1041,11 @@ loading :: proc(gtx: ^ui.Ctx, lines := 3, key: u64 = 0, loc := #caller_location)
 
 // failed is the banner for a CLI call that did not answer. It reports
 // whether there was one, so the page can stop there.
-failed :: proc(gtx: ^ui.Ctx, err: string) -> bool {
+failed :: proc(gtx: ^ui.Ctx, m: ^Model, err: string) -> bool {
 	if err == "" {
 		return false
 	}
-	primer.banner(gtx, "The vault did not answer", err, .Critical)
+	primer.banner(gtx, tr(m, .Vault_Did_Not_Answer), err, .Critical)
 	return true
 }
 
@@ -1053,24 +1151,20 @@ stats :: proc(gtx: ^ui.Ctx, width: f32, items: [][3]string, compact := false) {
 	}
 }
 
-// thousands is n with commas: 14219700 is 14,219,700.
-thousands :: proc(n: int) -> string {
-	digits := fmt.tprint(abs(n))
-	b := strings.builder_make(context.temp_allocator)
-	if n < 0 {
-		strings.write_byte(&b, '-')
-	}
-	for c, i in digits {
-		if i > 0 && (len(digits) - i) % 3 == 0 {
-			strings.write_byte(&b, ',')
-		}
-		strings.write_rune(&b, c)
-	}
-	return strings.to_string(b)
+// thousands is n in locale's digits and grouping. English groups from
+// four digits: 14219700 is 14,219,700 and 611 stays 611.
+thousands :: proc(n: int, locale := i18n.Locale.English) -> string {
+	return i18n.number(locale, n)
 }
 
-// compact is n at a glance: 14.2M, 378k, 611.
-compact :: proc(n: int) -> string {
+// digits is n in the locale the desk is showing.
+digits :: proc(m: ^Model, n: int) -> string {
+	return thousands(n, msg.locale(&m.strings))
+}
+
+// compact is n at a glance: 14.2M, 378k, 611. The short forms stay;
+// a count under 10,000 uses the locale's digits.
+compact :: proc(n: int, locale := i18n.Locale.English) -> string {
 	switch {
 	case n >= 10_000_000:
 		return fmt.tprintf("%dM", n / 1_000_000)
@@ -1079,15 +1173,15 @@ compact :: proc(n: int) -> string {
 	case n >= 10_000:
 		return fmt.tprintf("%dk", n / 1000)
 	}
-	return thousands(n)
+	return thousands(n, locale)
 }
 
 // percent is part of whole, rounded, or "–" for nothing.
-percent :: proc(part, whole: int) -> string {
+percent :: proc(part, whole: int, locale := i18n.Locale.English) -> string {
 	if whole == 0 {
 		return "–"
 	}
-	return fmt.tprintf("%d%%", (part * 100 + whole / 2) / whole)
+	return fmt.tprintf("%s%%", i18n.number(locale, (part * 100 + whole / 2) / whole))
 }
 
 // clock is a timestamp to the minute: "2026-10-07 21:59:08" reads

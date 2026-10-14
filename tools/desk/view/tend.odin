@@ -10,6 +10,7 @@ import "jm:ui"
 import "jm:ui/ops"
 import "jm:ui/primer"
 
+import "../../../msg"
 import "../shapes"
 
 // --- Inbox ---------------------------------------------------------------------
@@ -35,7 +36,7 @@ proposals_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	n := len(m.selected)
 	ui.row(gtx, gap = 8, align = .Center)
 	all := n == len(ps) && n > 0
-	if primer.checkbox(gtx, &all, "Select all", indeterminate = n > 0 && n < len(ps), state = len(ps) == 0 ? .Disabled : .Live) {
+	if primer.checkbox(gtx, &all, tr(m, .Select_All), indeterminate = n > 0 && n < len(ps), state = len(ps) == 0 ? .Disabled : .Live) {
 		for p in ps {
 			select(m, p.handle, all)
 		}
@@ -45,10 +46,10 @@ proposals_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	// In a narrow pane the buttons keep their icons and counts and give up
 	// their words; their names still say what they do.
 	words := gtx.constraints.max.x >= 330
-	if primer.button(gtx, words ? "Approve" : "", .Primary, .Small, leading = .Check, count = none ? "" : fmt.tprint(n), inactive = none, name = "Approve selected") && !none {
+	if primer.button(gtx, words ? tr(m, .Approve) : "", .Primary, .Small, leading = .Check, count = none ? "" : digits(m, n), inactive = none, name = tr(m, .Approve_Selected)) && !none {
 		m.confirm, m.bulk = true, .Approve
 	}
-	if primer.button(gtx, words ? "Drop" : "", .Danger, .Small, leading = .X, count = none ? "" : fmt.tprint(n), inactive = none, name = "Drop selected") && !none {
+	if primer.button(gtx, words ? tr(m, .Drop) : "", .Danger, .Small, leading = .X, count = none ? "" : digits(m, n), inactive = none, name = tr(m, .Drop_Selected)) && !none {
 		m.confirm, m.bulk = true, .Drop
 	}
 }
@@ -64,7 +65,7 @@ page_inbox :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	arrange(gtx, m)
 	w := split_list(gtx, m)
 	if !ready(st) {
-		pane(gtx, m, .Proposals, w[0], "Proposals")
+		pane(gtx, m, .Proposals, w[0], tr(m, .Proposals))
 		loading(gtx, 4)
 		return
 	}
@@ -81,12 +82,12 @@ page_inbox :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		choose(&m.proposal, ps[0].handle)
 	}
 	list: {
-		pane(gtx, m, .Proposals, w[0], "Proposals", len(ps), bar = len(ps) > 0 ? proposals_bar : nil)
-		if failed(gtx, inbox.error) {
+		pane(gtx, m, .Proposals, w[0], tr(m, .Proposals), len(ps), bar = len(ps) > 0 ? proposals_bar : nil)
+		if failed(gtx, m, inbox.error) {
 			return
 		}
 		if len(ps) == 0 {
-			empty(gtx, "Nothing waiting", "When an agent proposes a fact, it waits here for you. What your agents remembered on their own can be brought in with Import memories.", .Inbox)
+			empty(gtx, tr(m, .Nothing_Waiting), tr(m, .Nothing_Waiting_Body), .Inbox)
 		}
 		ui.inset(gtx, {8, 8, 8, 8})
 		ui.column(gtx, gap = 2, align = .Fill)
@@ -112,7 +113,7 @@ page_inbox :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	{
 		pane(gtx, m, .Proposal, w[1], footer = idx >= 0 ? proposal_actions : nil)
 		if idx < 0 {
-			empty(gtx, "Nothing to review", "Choose a proposal to read it in full.", .Inbox)
+			empty(gtx, tr(m, .Nothing_To_Review), tr(m, .Nothing_To_Review_Body), .Inbox)
 			return
 		}
 		proposal(gtx, m, ps[idx])
@@ -131,10 +132,10 @@ proposal_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	dropping := waiting_on(m, .Drop, handle)
 	busy := approving || dropping
 	ui.row(gtx, gap = 8, align = .Center)
-	if primer.button(gtx, "Approve", .Primary, leading = .Check, loading = approving, inactive = dropping, name = fmt.tprintf("Approve %s", handle)) && !busy {
+	if primer.button(gtx, tr(m, .Approve), .Primary, leading = .Check, loading = approving, inactive = dropping, name = tf(m, .Approve_One, handle)) && !busy {
 		send(gtx, m, .Approve, {handle})
 	}
-	if primer.button(gtx, "Drop", .Danger, leading = .X, loading = dropping, inactive = approving, name = fmt.tprintf("Drop %s", handle)) && !busy {
+	if primer.button(gtx, tr(m, .Drop), .Danger, leading = .X, loading = dropping, inactive = approving, name = tf(m, .Drop_One, handle)) && !busy {
 		send(gtx, m, .Drop, {handle})
 	}
 }
@@ -151,17 +152,17 @@ proposal :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal) {
 		if pill {
 			primer.label(gtx, p.source, .Secondary)
 		}
-		primer.text(gtx, fmt.tprintf("proposed %s", p.date), .Small, color = s[.Fg_Color_Muted], key = 1)
+		primer.text(gtx, tf(m, .Proposed_When, p.date), .Small, color = s[.Fg_Color_Muted], key = 1)
 	}
 	if p.source != "" && !pill {
-		primer.text(gtx, fmt.tprintf("source: %s", p.source), .Small, color = s[.Fg_Color_Muted], key = 4)
+		primer.text(gtx, tf(m, .Source_Line, p.source), .Small, color = s[.Fg_Color_Muted], key = 4)
 	}
 	primer.text(gtx, p.fact, .Large, key = 2)
 	if p.aliases != "" {
-		primer.text(gtx, fmt.tprintf("also found as: %s", p.aliases), .Small, color = s[.Fg_Color_Muted], key = 3)
+		primer.text(gtx, tf(m, .Also_Found, p.aliases), .Small, color = s[.Fg_Color_Muted], key = 3)
 	}
 	if p.line != "" {
-		primer.text(gtx, "As it will be written", .Small, .Medium, color = s[.Fg_Color_Muted], key = 5)
+		primer.text(gtx, tr(m, .As_Written), .Small, .Medium, color = s[.Fg_Color_Muted], key = 5)
 		b := boxed(gtx, 12, key = 6)
 		primer.text(gtx, p.line, .Small, key = 7)
 		ui.close(&b)
@@ -217,19 +218,19 @@ bulk_confirm :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	}
 	names := strings.join(m.selected[:min(n, 5)], ", ", context.temp_allocator)
 	if n > 5 {
-		names = fmt.tprintf("%s and %d more", names, n - 5)
+		names = tf(m, .And_More, names, n - 5)
 	}
-	what := n == 1 ? "1 proposal" : fmt.tprintf("%d proposals", n)
+	what := tf(m, .Proposal, n)
 	title, body, verb: string
 	variant: primer.Button_Variant
 	if m.bulk == .Approve {
-		title = fmt.tprintf("Approve %s?", what)
-		body = fmt.tprintf("They join the vault and answer every agent's finds: %s.", names)
-		verb, variant = "Approve", .Primary
+		title = tf(m, .Approve_Ask, what)
+		body = tf(m, .Approve_Body, names)
+		verb, variant = tr(m, .Approve), .Primary
 	} else {
-		title = fmt.tprintf("Drop %s?", what)
-		body = fmt.tprintf("They leave the inbox and are not proposed again: %s.", names)
-		verb, variant = "Drop", .Danger
+		title = tf(m, .Drop_Ask, what)
+		body = tf(m, .Drop_Inbox_Body, names)
+		verb, variant = tr(m, .Drop), .Danger
 	}
 	if primer.confirmation_dialog(gtx, &m.confirm, title, body, confirm_content = verb, confirm_type = variant) == .Confirm {
 		send(gtx, m, m.bulk, m.selected[:])
@@ -294,6 +295,54 @@ FINDING_HELP := [Finding_List]string {
 	.Never_Returned = "No query has returned this bullet yet. It may be named in words nobody uses: check its handle and aliases.",
 }
 
+FINDING_MSG := [Finding_List]msg.Msg {
+	.Failed_Claims  = .Finding_Failed,
+	.Stale          = .Finding_Stale,
+	.Dead_Links     = .Finding_Links,
+	.Duplicates     = .Finding_Dupes,
+	.Thin_Aliases   = .Finding_Thin,
+	.Oversized      = .Finding_Over,
+	.Orphans        = .Finding_Orphans,
+	.Promote        = .Finding_Promote,
+	.Never_Returned = .Finding_Never,
+}
+
+FINDING_NOTE := [Finding_List]msg.Msg {
+	.Failed_Claims  = .Note_Failed,
+	.Stale          = .Note_Stale,
+	.Dead_Links     = .Note_Links,
+	.Duplicates     = .Note_Dupes,
+	.Thin_Aliases   = .Note_Thin,
+	.Oversized      = .Note_Over,
+	.Orphans        = .Note_Orphans,
+	.Promote        = .Note_Promote,
+	.Never_Returned = .Note_Never,
+}
+
+FINDING_TIP := [Finding_List]msg.Msg {
+	.Failed_Claims  = .Help_Failed,
+	.Stale          = .Help_Stale,
+	.Dead_Links     = .Help_Links,
+	.Duplicates     = .Help_Dupes,
+	.Thin_Aliases   = .Help_Thin,
+	.Oversized      = .Help_Over,
+	.Orphans        = .Help_Orphans,
+	.Promote        = .Help_Promote,
+	.Never_Returned = .Help_Never,
+}
+
+FINDING_NONE := [Finding_List]msg.Msg {
+	.Failed_Claims  = .No_Failed,
+	.Stale          = .No_Stale,
+	.Dead_Links     = .No_Links,
+	.Duplicates     = .No_Dupes,
+	.Thin_Aliases   = .No_Thin,
+	.Oversized      = .No_Over,
+	.Orphans        = .No_Orphans,
+	.Promote        = .No_Promote,
+	.Never_Returned = .No_Never,
+}
+
 FINDING_ICONS := [Finding_List]primer.Icon {
 	.Failed_Claims  = .Alert,
 	.Stale          = .Clock,
@@ -331,40 +380,41 @@ finding_count :: proc(d: ^shapes.Doctor_Result, l: Finding_List) -> int {
 }
 
 // finding_key is what names item i of list l across reports.
-finding_key :: proc(d: ^shapes.Doctor_Result, l: Finding_List, i: int) -> string {
-	title, note := finding_row(d, l, i)
+finding_key :: proc(m: ^Model, d: ^shapes.Doctor_Result, l: Finding_List, i: int) -> string {
+	title, note := finding_row(m, d, l, i)
 	return fmt.tprintf("%s\x1f%s", title, note)
 }
 
 // finding_row is item i of list l as a list row: its name and a line.
-finding_row :: proc(d: ^shapes.Doctor_Result, l: Finding_List, i: int) -> (title, note: string) {
+// A file and a line stay text, so a locale's digits do not rewrite them.
+finding_row :: proc(m: ^Model, d: ^shapes.Doctor_Result, l: Finding_List, i: int) -> (title, note: string) {
 	switch l {
 	case .Failed_Claims:
 		c := d.failed_claims[i]
 		return c.handle, fmt.tprintf("%s %s: %s", c.kind, c.text, c.why)
 	case .Stale:
 		f := d.stale[i]
-		return f.handle, fmt.tprintf("last dated %s", f.date)
+		return f.handle, tf(m, .Last_Dated, f.date)
 	case .Dead_Links:
 		x := d.dead_links[i]
-		return x.target, fmt.tprintf("%s:%d", x.file, x.line)
+		return x.target, tf(m, .Place, x.file, fmt.tprint(x.line))
 	case .Duplicates:
 		f := d.duplicate_handles[i]
 		return f.handle, f.file
 	case .Thin_Aliases:
 		f := d.thin_aliases[i]
-		return f.handle, f.aliases == "" ? "no aliases" : fmt.tprintf("only: %s", f.aliases)
+		return f.handle, f.aliases == "" ? tr(m, .No_Aliases) : tf(m, .Only_Aliases, f.aliases)
 	case .Oversized:
 		f := d.oversized[i]
-		return f.handle, fmt.tprintf("%d characters", f.len)
+		return f.handle, tf(m, .Characters, f.len)
 	case .Orphans:
-		return d.orphan_artifacts[i].file, "nothing links to it"
+		return d.orphan_artifacts[i].file, tr(m, .Nothing_Links)
 	case .Promote:
 		f := d.promote[i]
-		return f.handle, fmt.tprintf("%d queries in %d sessions", f.queries, f.sessions)
+		return f.handle, tf(m, .Queries_Sessions, f.queries, f.sessions)
 	case .Never_Returned:
 		f := d.never_returned[i]
-		return f.handle, fmt.tprintf("since %s", f.date)
+		return f.handle, tf(m, .Since_Date, f.date)
 	}
 	return "", ""
 }
@@ -379,19 +429,19 @@ doctor_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	said := ""
 	switch {
 	case running:
-		said = "Checking the vault…"
+		said = tr(m, .Checking_Vault)
 	case ready(st) && d.ran_at != "":
-		said = fmt.tprintf("Report from %s · took %.1f s", d.ran_at, f64(d.took_ms) / 1000)
+		said = tf(m, .Report_From, d.ran_at, fmt.tprintf("%.1f", f64(d.took_ms) / 1000))
 	}
 	if body_width(m) >= NARROW {
 		primer.text(gtx, said, .Small, color = s[.Fg_Color_Muted])
 	}
 	button := ui.stack_open(gtx)
 	defer ui.close(&button)
-	if primer.button(gtx, "Check", .Primary, .Medium, leading = .Sync, loading = running) && !running {
+	if primer.button(gtx, tr(m, .Check), .Primary, .Medium, leading = .Sync, loading = running) && !running {
 		send(gtx, m, .Doctor)
 	}
-	primer.tooltip(gtx, "Check the vault again: what is stale, thin, oversized, orphaned or no longer verifies. It takes a second or two; the toast says what changed since the last check.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+	primer.tooltip(gtx, tr(m, .Check_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 }
 
 // page_doctor is doctor's lists, the items of the one chosen, and the
@@ -414,17 +464,17 @@ page_doctor :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		items_size, detail_size = {math.floor(room * 0.4), 0}, {math.floor(room * 0.6), 0}
 	}
 	if !ready(st) {
-		pane(gtx, m, .Findings_Kinds, narrow ? items_size : kinds_size, "Findings")
+		pane(gtx, m, .Findings_Kinds, narrow ? items_size : kinds_size, tr(m, .Findings))
 		loading(gtx, 6)
 		return
 	}
 	if d.error != "" {
 		pane(gtx, m, .Findings_Kinds, {body_width(m), 0})
-		failed(gtx, d.error)
+		failed(gtx, m, d.error)
 		return
 	}
 	kinds: if !narrow {
-		pane(gtx, m, .Findings_Kinds, kinds_size, "Findings", scroll = false)
+		pane(gtx, m, .Findings_Kinds, kinds_size, tr(m, .Findings), scroll = false)
 		ui.inset(gtx, ui.pad_all(8))
 		ui.column(gtx, gap = 2, align = .Fill)
 		for l in Finding_List {
@@ -432,12 +482,12 @@ page_doctor :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			// The row and its tooltip share a stack, so the tooltip watches
 			// the row's own box.
 			st := ui.stack_open(gtx, key = u64(l) + 100)
-			if row_button(gtx, FINDING_TITLES[l], l == m.findings, FINDING_ICONS[l], n > 0 ? fmt.tprint(n) : "", key = u64(l) + 1) {
+			if row_button(gtx, tr(m, FINDING_MSG[l]), l == m.findings, FINDING_ICONS[l], n > 0 ? digits(m, n) : "", key = u64(l) + 1) {
 				m.findings, m.findings_chosen = l, true
 				m.finding.len = 0
 				m.panes[.Findings], m.panes[.Finding] = {}, {}
 			}
-			primer.tooltip(gtx, FINDING_HELP[l], ui.last_widget(gtx), direction = .E, delay = TOOLTIP_DELAY)
+			primer.tooltip(gtx, tr(m, FINDING_TIP[l]), ui.last_widget(gtx), direction = .E, delay = TOOLTIP_DELAY)
 			ui.close(&st)
 		}
 	}
@@ -459,20 +509,20 @@ page_doctor :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	// the list differently, or no longer hold it, when the first is shown.
 	current := 0
 	for i in 0 ..< n {
-		if finding_key(d, list, i) == chosen(&m.finding) {
+		if finding_key(m, d, list, i) == chosen(&m.finding) {
 			current = i
 		}
 	}
 	{
-		pane(gtx, m, .Findings, items_size, narrow ? "" : FINDING_TITLES[list], n, bar = narrow ? findings_menu : nil)
+		pane(gtx, m, .Findings, items_size, narrow ? "" : tr(m, FINDING_MSG[list]), n, bar = narrow ? findings_menu : nil)
 		if n == 0 {
-			empty(gtx, fmt.tprintf("No %s", strings.to_lower(FINDING_TITLES[list], context.temp_allocator)), FINDING_NOTES[list], .Check_Circle)
+			empty(gtx, tr(m, FINDING_NONE[list]), tr(m, FINDING_NOTE[list]), .Check_Circle)
 		} else {
-			l := primer.action_list_open(gtx, .Full, dividers = true, name = FINDING_TITLES[list])
+			l := primer.action_list_open(gtx, .Full, dividers = true, name = tr(m, FINDING_MSG[list]))
 			for i in 0 ..< n {
-				title, note := finding_row(d, list, i)
+				title, note := finding_row(m, d, list, i)
 				if primer.action_list_item(&l, title, description = note, description_variant = .Block, truncate = true, leading = FINDING_ICONS[list], active = i == current) {
-					choose(&m.finding, finding_key(d, list, i))
+					choose(&m.finding, finding_key(m, d, list, i))
 					m.panes[.Finding] = {}
 				}
 			}
@@ -483,7 +533,7 @@ page_doctor :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		m.fix.list, m.fix.at = list, current
 		pane(gtx, m, .Finding, detail_size, footer = n > 0 && has_fixes(list) ? fix_bar : nil)
 		if n == 0 {
-			empty(gtx, "Nothing to look at", FINDING_NOTES[list], .Shield_Check)
+			empty(gtx, tr(m, .Nothing_To_Look_At), tr(m, FINDING_NOTE[list]), .Shield_Check)
 			return
 		}
 		finding_detail(gtx, m, d, list, current)
@@ -500,10 +550,11 @@ findings_menu :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	options := make([]primer.Select_Option, len(Finding_List), context.temp_allocator)
 	for l in Finding_List {
 		n := finding_count(d, l)
-		options[int(l)] = {label = n > 0 ? fmt.tprintf("%s (%d)", FINDING_TITLES[l], n) : FINDING_TITLES[l]}
+		title := tr(m, FINDING_MSG[l])
+		options[int(l)] = {label = n > 0 ? tf(m, .Kind_Count, title, n) : title}
 	}
 	list := int(m.findings)
-	if primer.select(gtx, options, &list, size = .Small, block = true, name = "Findings") {
+	if primer.select(gtx, options, &list, size = .Small, block = true, name = tr(m, .Findings)) {
 		m.findings, m.findings_chosen = Finding_List(list), true
 		m.finding.len = 0
 		m.panes[.Findings], m.panes[.Finding] = {}, {}
@@ -516,17 +567,17 @@ finding_detail :: proc(gtx: ^ui.Ctx, m: ^Model, d: ^shapes.Doctor_Result, l: Fin
 	s := &m.scheme
 	ui.inset(gtx, ui.pad_all(16))
 	ui.column(gtx, gap = 12, align = .Fill)
-	title, note := finding_row(d, l, i)
-	primer.label(gtx, FINDING_TITLES[l], l == .Failed_Claims ? .Danger : .Secondary)
+	title, note := finding_row(m, d, l, i)
+	primer.label(gtx, tr(m, FINDING_MSG[l]), l == .Failed_Claims ? .Danger : .Secondary)
 	primer.heading(gtx, title, 2, .Medium)
-	primer.text(gtx, FINDING_NOTES[l], color = s[.Fg_Color_Muted])
+	primer.text(gtx, tr(m, FINDING_NOTE[l]), color = s[.Fg_Color_Muted])
 	#partial switch l {
 	case .Failed_Claims:
 		c := d.failed_claims[i]
-		fields(gtx, {{"file", c.file}, {"claim", fmt.tprintf("%s %s", c.kind, c.text)}, {"why it failed", c.why}, {"checked", c.checked}})
+		fields(gtx, {{tr(m, .Label_File), c.file}, {tr(m, .Label_Claim), fmt.tprintf("%s %s", c.kind, c.text)}, {tr(m, .Why_Failed), c.why}, {tr(m, .Label_Checked), c.checked}})
 	case .Dead_Links:
 		x := d.dead_links[i]
-		fields(gtx, {{"in", fmt.tprintf("%s, line %d", x.file, x.line)}, {"links to", x.target}})
+		fields(gtx, {{tr(m, .Label_In), tf(m, .Line_At, x.file, fmt.tprint(x.line))}, {tr(m, .Links_To), x.target}})
 	case:
 		_ = note
 		f: shapes.Finding
@@ -557,18 +608,18 @@ finding_detail :: proc(gtx: ^ui.Ctx, m: ^Model, d: ^shapes.Doctor_Result, l: Fin
 			return
 		}
 		rows := make([dynamic][2]string, context.temp_allocator)
-		append(&rows, [2]string{"file", f.file})
+		append(&rows, [2]string{tr(m, .Label_File), f.file})
 		if f.aliases != "" && l != .Thin_Aliases {
-			append(&rows, [2]string{"aliases", f.aliases})
+			append(&rows, [2]string{tr(m, .Label_Aliases), f.aliases})
 		}
 		if f.date != "" {
-			append(&rows, [2]string{"dated", f.date})
+			append(&rows, [2]string{tr(m, .Label_Dated), f.date})
 		}
 		if f.len > 0 {
-			append(&rows, [2]string{"length", fmt.tprintf("%d characters", f.len)})
+			append(&rows, [2]string{tr(m, .Label_Length), tf(m, .Characters, f.len)})
 		}
 		if f.queries > 0 {
-			append(&rows, [2]string{"asked for", fmt.tprintf("%d queries in %d sessions", f.queries, f.sessions)})
+			append(&rows, [2]string{tr(m, .Asked_For), tf(m, .Queries_Sessions, f.queries, f.sessions)})
 		}
 		fields(gtx, rows[:])
 	}
@@ -595,20 +646,22 @@ days_since :: proc(date: string) -> int {
 // age is days as a person says it: how old a thing is, "12 days old",
 // or with ago how long since it happened, short enough for a figure,
 // "12d ago"; a negative count is never.
-age :: proc(days: int, ago := false) -> string {
+age :: proc(m: ^Model, days: int, ago := false) -> string {
 	switch {
 	case days < 0:
-		return "never"
+		return tr(m, .Word_Never)
 	case days == 0:
-		return "today"
+		return tr(m, .Word_Today)
 	case days == 1:
-		return ago ? "yesterday" : "1 day old"
+		return ago ? tr(m, .Word_Yesterday) : tf(m, .Age_Day, 1)
 	case days < 60:
-		return ago ? fmt.tprintf("%dd ago", days) : fmt.tprintf("%d days old", days)
+		return ago ? tf(m, .Ago_Day, days) : tf(m, .Age_Day, days)
 	case days < 730:
-		return ago ? fmt.tprintf("%dmo ago", days / 30) : fmt.tprintf("%d months old", days / 30)
+		months := days / 30
+		return ago ? tf(m, .Ago_Month, months) : tf(m, .Age_Month, months)
 	}
-	return ago ? fmt.tprintf("%dy ago", days / 365) : fmt.tprintf("%d years old", days / 365)
+	years := days / 365
+	return ago ? tf(m, .Ago_Year, years) : tf(m, .Age_Year, years)
 }
 
 // alias_editor is a bullet's other names, each removable, and a field
@@ -619,7 +672,7 @@ alias_editor :: proc(gtx: ^ui.Ctx, m: ^Model, handle, aliases: string) {
 	s := &m.scheme
 	busy := waiting_on(m, .Add_Alias, handle) || waiting_on(m, .Remove_Alias, handle)
 	ui.column(gtx, gap = 8, align = .Fill)
-	primer.text(gtx, "Other names", .Small, .Medium, color = s[.Fg_Color_Muted])
+	primer.text(gtx, tr(m, .Other_Names), .Small, .Medium, color = s[.Fg_Color_Muted])
 	names := make([dynamic]string, context.temp_allocator)
 	for raw in strings.split(aliases, ",", context.temp_allocator) {
 		if a := strings.trim_space(raw); a != "" {
@@ -629,7 +682,7 @@ alias_editor :: proc(gtx: ^ui.Ctx, m: ^Model, handle, aliases: string) {
 	{
 		ui.wrap(gtx, gap = 6, line_gap = 6, align = .Center)
 		if len(names) == 0 {
-			primer.text(gtx, "none yet", .Small, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .None_Yet), .Small, color = s[.Fg_Color_Muted])
 		}
 		for a, i in names {
 			r := primer.token(gtx, a, removable = true, state = busy ? .Disabled : .Live, key = u64(i + 1))
@@ -646,9 +699,9 @@ alias_editor :: proc(gtx: ^ui.Ctx, m: ^Model, handle, aliases: string) {
 		e: primer.Field_Edit
 		{
 			ui.sized(gtx, {min = {w, 0}, max = {w, ui.INF}})
-			e = primer.text_input(gtx, &m.alias, placeholder = "Another name a searcher might use", size = .Small, validation = term != "" && !ok ? .Error : .None, name = "New alias")
+			e = primer.text_input(gtx, &m.alias, placeholder = tr(m, .Alias_Ph), size = .Small, validation = term != "" && !ok ? .Error : .None, name = tr(m, .New_Alias))
 		}
-		add := primer.button(gtx, "Add", .Primary, .Small, leading = .Plus, loading = busy, inactive = !ok)
+		add := primer.button(gtx, tr(m, .Add), .Primary, .Small, leading = .Plus, loading = busy, inactive = !ok)
 		if (add || e.submitted) && ok && !busy {
 			send(gtx, m, .Add_Alias, {handle}, term)
 			ui.text_set(&m.alias, "")
@@ -656,7 +709,7 @@ alias_editor :: proc(gtx: ^ui.Ctx, m: ^Model, handle, aliases: string) {
 	}
 	term := strings.trim_space(ui.text_string(&m.alias))
 	if term != "" && !alias_ok(term) {
-		primer.inline_message(gtx, "A name cannot hold a comma, parenthesis, asterisk or em dash: they would break the bullet.", .Critical, .Small)
+		primer.inline_message(gtx, tr(m, .Alias_Bad), .Critical, .Small)
 	}
 }
 
@@ -716,10 +769,10 @@ vault_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	{
 		st := ui.stack_open(gtx)
 		defer ui.close(&st)
-		if primer.button(gtx, "Reindex", .Default, .Medium, leading = .Database, loading = reindexing) && !reindexing {
+		if primer.button(gtx, tr(m, .Reindex), .Default, .Medium, leading = .Database, loading = reindexing) && !reindexing {
 			send(gtx, m, .Reindex)
 		}
-		primer.tooltip(gtx, "Read every note again and rebuild what finds search. It happens on its own when a note changes; use it if answers look out of date.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+		primer.tooltip(gtx, tr(m, .Reindex_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 	}
 }
 
@@ -732,10 +785,10 @@ where_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	st2 := ui.stack_open(gtx)
 	// The system's own folder dialog chooses; what it would change is then
 	// shown before it is used.
-	if primer.button(gtx, "Change", .Default, leading = .File_Directory, loading = moving) && !moving {
+	if primer.button(gtx, tr(m, .Change), .Default, leading = .File_Directory, loading = moving) && !moving {
 		ui.pick_folder(gtx, VAULT_PICK, ready(st) ? v.vault : "")
 	}
-	primer.tooltip(gtx, "Use the vault in another folder on this machine: its notes answer every agent from then on.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+	primer.tooltip(gtx, tr(m, .Change_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 	ui.close(&st2)
 }
 
@@ -773,8 +826,8 @@ move_dialog :: proc(gtx: ^ui.Ctx, m: ^Model, current: string) {
 		}
 	}
 	use, cancel: bool
-	footer := []primer.Dialog_Button{{content = "Cancel", clicked = &cancel}, {content = "Use this vault", type = .Primary, disabled = !ok, clicked = &use}}
-	dl := primer.dialog_open(gtx, &m.moving, "Change vault", "The folder whose notes answer your agents on this machine.", footer, width = .Large)
+	footer := []primer.Dialog_Button{{content = tr(m, .Cancel), clicked = &cancel}, {content = tr(m, .Use_This_Vault), type = .Primary, disabled = !ok, clicked = &use}}
+	dl := primer.dialog_open(gtx, &m.moving, tr(m, .Change_Vault), tr(m, .Change_Vault_Body), footer, width = .Large)
 	if dl.visible {
 		ui.column(gtx, gap = 12, align = .Fill)
 		{
@@ -782,17 +835,17 @@ move_dialog :: proc(gtx: ^ui.Ctx, m: ^Model, current: string) {
 			{
 				fw := max(gtx.constraints.max.x - 110, 160)
 				ui.sized(gtx, {min = {fw, 0}, max = {fw, ui.INF}})
-				primer.text_input(gtx, &m.vault_path, placeholder = "/path/to/vault", leading = .File_Directory, block = true, name = "Vault folder")
+				primer.text_input(gtx, &m.vault_path, placeholder = "/path/to/vault", leading = .File_Directory, block = true, name = tr(m, .Vault_Folder))
 			}
-			if primer.button(gtx, "Browse", .Default) {
+			if primer.button(gtx, tr(m, .Browse), .Default) {
 				ui.pick_folder(gtx, VAULT_PICK, path != "" ? path : current)
 			}
 		}
 		switch {
 		case !asked:
-			primer.text(gtx, "Choose the folder of the vault to use, or type its path.", .Small, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .Choose_Folder), .Small, color = s[.Fg_Color_Muted])
 		case plan == nil:
-			primer.text(gtx, "Checking…", .Small, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .Checking), .Small, color = s[.Fg_Color_Muted])
 		case !plan.ok:
 			primer.inline_message(gtx, plan.error, .Critical, .Small)
 		case:
@@ -804,7 +857,7 @@ move_dialog :: proc(gtx: ^ui.Ctx, m: ^Model, current: string) {
 					primer.inline_message(gtx, strings.trim_space(strings.trim_prefix(strings.trim_space(l), "warning:")), .Warning, .Small, key = u64(100 + i))
 				}
 			}
-			primer.text(gtx, "Using it changes this:", .Small, .Medium, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .Using_Changes), .Small, .Medium, color = s[.Fg_Color_Muted])
 			b := boxed(gtx, 12)
 			{
 				ui.column(gtx, gap = 2, align = .Fill)
@@ -835,32 +888,32 @@ page_vault :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	arrange(gtx, m)
 	w := split(gtx, m, 0.5, 0.5)
 	location: {
-		pane(gtx, m, .Vault, w[0], "Where", scroll = false, footer = ready(st) ? where_actions : nil)
+		pane(gtx, m, .Vault, w[0], tr(m, .Where), scroll = false, footer = ready(st) ? where_actions : nil)
 		if !ready(st) {
 			loading(gtx, 3)
 			break location
 		}
-		failed(gtx, v.error)
+		failed(gtx, m, v.error)
 		ui.inset(gtx, ui.pad_all(16))
 		version := v.version
 		if v.commit != "" {
-			version = fmt.tprintf("%s · %s", v.version, v.commit)
+			version = tf(m, .Join_Dot, v.version, v.commit)
 		}
 		ui.column(gtx, gap = 8, align = .Fill)
 		{
 			ui.column(gtx, gap = 2, align = .Fill, key = 1)
-			primer.text(gtx, "vault", .Small, .Medium, color = m.scheme[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .Label_Vault), .Small, .Medium, color = m.scheme[.Fg_Color_Muted])
 			// The folder opens in the system's file manager.
 			st := ui.stack_open(gtx, key = 2)
 			if primer.link(gtx, v.vault) {
 				ui.open_url(gtx, file_url(v.vault))
 			}
-			primer.tooltip(gtx, "Open the folder in your file manager.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+			primer.tooltip(gtx, tr(m, .Open_Folder_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 			ui.close(&st)
 		}
-		fields(gtx, {{"brain", version}, {"checkout", v.tool}})
+		fields(gtx, {{"brain", version}, {tr(m, .Label_Checkout), v.tool}})
 	}
-	pane(gtx, m, .Vault_Travel, w[1], "Sync and review", scroll = false)
+	pane(gtx, m, .Vault_Travel, w[1], tr(m, .Sync_And_Review), scroll = false)
 	if !ready(st) {
 		loading(gtx, 3)
 		return
@@ -872,19 +925,20 @@ page_vault :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		{
 			ui.row(gtx, gap = 8, align = .Center)
 			on := v.sync == "on"
-			primer.state_label(gtx, on ? "On" : "Off", on ? .Open : .Closed, .Small)
-			primer.text(gtx, v.remote != "" ? v.remote : "no remote yet", weight = .Medium)
+			primer.state_label(gtx, on ? tr(m, .On) : tr(m, .Off), on ? .Open : .Closed, .Small)
+			primer.text(gtx, v.remote != "" ? v.remote : tr(m, .No_Remote), weight = .Medium)
 		}
-		waiting := v.changed == 0 ? "nothing waiting to send" : v.changed == 1 ? "1 change waiting to send" : fmt.tprintf("%d changes waiting to send", v.changed)
-		primer.text(gtx, fmt.tprintf("Last: %s · %s", v.last != "" ? sync_time(v.last) : "never", waiting), .Small, color = s[.Fg_Color_Muted])
+		waiting := v.changed == 0 ? tr(m, .Nothing_To_Send) : tf(m, .Changes_Waiting, v.changed)
+		last := v.last != "" ? sync_time(v.last) : tr(m, .Word_Never)
+		primer.text(gtx, tf(m, .Last_Sync, last, waiting), .Small, color = s[.Fg_Color_Muted])
 	}
 	{
 		ui.column(gtx, gap = 8, align = .Fill)
-		primer.heading(gtx, "Review", 3, .Small)
-		primer.text(gtx, "When may an agent's proposal answer a find: at once, marked unreviewed, or only once you approve it?", .Small, color = s[.Fg_Color_Muted])
-		segments := []primer.Segment{{label = "At once"}, {label = "Once approved"}}
+		primer.heading(gtx, tr(m, .Review), 3, .Small)
+		primer.text(gtx, tr(m, .Review_Question), .Small, color = s[.Fg_Color_Muted])
+		segments := []primer.Segment{{label = tr(m, .At_Once)}, {label = tr(m, .Once_Approved)}}
 		mode := v.review == "before" ? 1 : 0
-		if primer.segmented_control(gtx, segments, &mode, "Review") && !waiting_on(m, .Review) {
+		if primer.segmented_control(gtx, segments, &mode, tr(m, .Review)) && !waiting_on(m, .Review) {
 			send(gtx, m, .Review, nil, mode == 1 ? "before" : "after")
 		}
 	}

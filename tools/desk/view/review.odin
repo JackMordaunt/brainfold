@@ -47,7 +47,7 @@ proposal_review :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal) {
 		loading(gtx, 3)
 		return
 	}
-	if failed(gtx, r.error) {
+	if failed(gtx, m, r.error) {
 		return
 	}
 	if len(r.errors) + len(r.warnings) > 0 {
@@ -61,11 +61,11 @@ proposal_review :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal) {
 	}
 	repeats: {
 		ui.column(gtx, gap = 8, align = .Fill, key = 2)
-		section(gtx, "May repeat")
+		section(gtx, tr(m, .May_Repeat))
 		if len(r.similar) == 0 {
 			primer.text(
 				gtx,
-				"Nothing in the vault says this yet.",
+				tr(m, .Nothing_Says),
 				.Small,
 				color = s[.Fg_Color_Muted],
 			)
@@ -76,12 +76,12 @@ proposal_review :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal) {
 	}
 	origin: {
 		ui.column(gtx, gap = 8, align = .Fill, key = 3)
-		section(gtx, "Where it came from")
+		section(gtx, tr(m, .Where_From))
 		o := r.origin
 		if o.session == "" {
 			primer.text(
 				gtx,
-				"No agent transcript on this machine proposed it: it was imported, written by hand, or proposed on another machine.",
+				tr(m, .No_Transcript),
 				.Small,
 				color = s[.Fg_Color_Muted],
 			)
@@ -90,21 +90,21 @@ proposal_review :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal) {
 		card := boxed(gtx, 12)
 		defer ui.close(&card)
 		ui.column(gtx, gap = 8, align = .Fill)
-		primer.text(gtx, o.title != "" ? o.title : "Untitled session", .Medium, .Semibold)
+		primer.text(gtx, o.title != "" ? o.title : tr(m, .Untitled_Session), .Medium, .Semibold)
 		when_ := len(o.ts) >= 16 ? fmt.tprintf("%s %s", o.ts[:10], o.ts[11:16]) : o.ts
 		primer.text(
 			gtx,
-			fmt.tprintf("Proposed by %s, %s", o.agent != "" ? o.agent : "an agent", when_),
+			tf(m, .Proposed_By, o.agent != "" ? o.agent : tr(m, .An_Agent), when_),
 			.Small,
 			color = s[.Fg_Color_Muted],
 		)
 		ui.row(gtx, align = .Center)
 		st := ui.stack_open(gtx)
 		defer ui.close(&st)
-		if primer.button(gtx, "Read", .Default, .Small, leading = .Comment_Discussion) {
+		if primer.button(gtx, tr(m, .Read), .Default, .Small, leading = .Comment_Discussion) {
 			read_conversation(m, p.handle, o.turn)
 		}
-		primer.tooltip(gtx, "Read the conversation that proposed it, in Recall.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+		primer.tooltip(gtx, tr(m, .Read_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 	}
 }
 
@@ -119,13 +119,13 @@ similar_card :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal, b: shapes.Near
 		ui.wrap(gtx, gap = 8, line_gap = 4, align = .Center)
 		primer.text(gtx, b.handle, .Medium, .Semibold)
 		if b.same_handle {
-			primer.label(gtx, "same handle", .Attention, key = 1)
+			primer.label(gtx, tr(m, .Same_Handle), .Attention, key = 1)
 		}
-		primer.label(gtx, fmt.tprintf("%.0f%% shared", b.share * 100), .Secondary, key = 2)
+		primer.label(gtx, tf(m, .Shared_Pct, int(b.share * 100 + 0.5)), .Secondary, key = 2)
 	}
 	primer.text(
 		gtx,
-		fmt.tprintf("%s:%d · %s", b.file, b.line, b.date),
+		tf(m, .At_Place, b.file, fmt.tprint(b.line), b.date),
 		.Small,
 		color = s[.Fg_Color_Muted],
 		key = 3,
@@ -136,7 +136,7 @@ similar_card :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal, b: shapes.Near
 	st := ui.stack_open(gtx, key = 6)
 	if primer.button(
 		   gtx,
-		   "Merge",
+		   tr(m, .Merge),
 		   .Default,
 		   .Small,
 		   leading = .Git_Merge,
@@ -147,7 +147,7 @@ similar_card :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal, b: shapes.Near
 	}
 	primer.tooltip(
 		gtx,
-		"Fold the proposal into this bullet: edit the bullet with what the proposal adds, and the proposal leaves the inbox.",
+		tr(m, .Merge_Tip),
 		ui.last_widget(gtx),
 		delay = TOOLTIP_DELAY,
 	)
@@ -232,14 +232,14 @@ merge_dialog :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	}
 	go_, cancel: bool
 	footer := []primer.Dialog_Button {
-		{content = "Cancel", clicked = &cancel},
-		{content = "Merge", type = .Primary, disabled = errors != 0, clicked = &go_},
+		{content = tr(m, .Cancel), clicked = &cancel},
+		{content = tr(m, .Merge), type = .Primary, disabled = errors != 0, clicked = &go_},
 	}
 	dl := primer.dialog_open(
 		gtx,
 		&e.open,
-		fmt.tprintf("Merge into %s", chosen(&e.into)),
-		"The bullet keeps its place; the proposal leaves the inbox and is not proposed again.",
+		tf(m, .Merge_Into, chosen(&e.into)),
+		tr(m, .Merge_Body),
 		footer,
 		width = .Large,
 	)
@@ -247,27 +247,27 @@ merge_dialog :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		ui.column(gtx, gap = 12, align = .Fill)
 		{
 			ui.column(gtx, gap = 4, align = .Fill, key = 1)
-			primer.text(gtx, "The proposal says", .Small, .Medium, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .Proposal_Says), .Small, .Medium, color = s[.Fg_Color_Muted])
 			b := boxed(gtx, 12)
 			primer.text(gtx, chosen(&e.said), .Small)
 			ui.close(&b)
 		}
-		field(gtx, "Handle", "what a find names it by", &e.handle, key = 2)
-		field(gtx, "Aliases", "other names, comma-separated", &e.aliases, key = 3)
+		field(gtx, tr(m, .Handle), tr(m, .Handle_Ph), &e.handle, key = 2)
+		field(gtx, tr(m, .Aliases), tr(m, .Aliases_Ph), &e.aliases, key = 3)
 		{
 			ui.column(gtx, gap = 4, align = .Fill, key = 4)
-			primer.text(gtx, "Fact", .Small, .Medium, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .Fact), .Small, .Medium, color = s[.Fg_Color_Muted])
 			primer.textarea(
 				gtx,
 				&e.fact,
-				placeholder = "One fact, stated once",
+				placeholder = tr(m, .Fact_Ph),
 				rows = 4,
 				resize = .None,
 				block = true,
-				name = "Merged fact",
+				name = tr(m, .Merged_Fact),
 			)
 		}
-		field(gtx, "Source", "where it came from", &e.source, key = 5)
+		field(gtx, tr(m, .Source), tr(m, .Source_Ph), &e.source, key = 5)
 		if c != nil {
 			for x, i in c.errors {
 				primer.inline_message(gtx, x, .Critical, .Small, key = u64(20 + i))

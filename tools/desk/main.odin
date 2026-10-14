@@ -36,6 +36,7 @@ import "jm:ui/primer"
 import "jm:ui/render"
 import "jm:ui/shell"
 
+import "../../msg"
 import "app"
 import "cli"
 import "fonts"
@@ -46,8 +47,12 @@ HEIGHT :: 840
 SETTLE_LIMIT :: 30 * time.Second
 
 main :: proc() {
+	conf := msg.config_dir()
+	system := msg.system_tags()
+	msg.boot(conf, system)
 	m: view.Model
-	view.model_init(&m)
+	view.model_init(&m, locale = msg.locale_now())
+	m.language_dir = conf
 	defer view.model_destroy(&m)
 	faces := fonts.fonts()
 
@@ -79,7 +84,7 @@ main :: proc() {
 				}
 			}
 			if !found {
-				fmt.eprintfln("no page %s", name)
+				fmt.eprintln(msg.textf(.Desk_No_Page, name))
 				os.exit(2)
 			}
 			// The page asked for is the page shown: Setup's offer to a
@@ -94,7 +99,7 @@ main :: proc() {
 				}
 			}
 			if !found {
-				fmt.eprintfln("no theme %s", name)
+				fmt.eprintln(msg.textf(.Desk_No_Theme, name))
 				os.exit(2)
 			}
 		case "-size":
@@ -103,7 +108,7 @@ main :: proc() {
 			wi, wok := strconv.parse_int(w)
 			hi, hok := strconv.parse_int(h)
 			if !wok || !hok || wi <= 0 || hi <= 0 {
-				fmt.eprintfln("-size wants WxH, got %s", v)
+				fmt.eprintln(msg.textf(.Desk_Bad_Size, v))
 				os.exit(2)
 			}
 			size = {f32(wi), f32(hi)}
@@ -119,7 +124,7 @@ main :: proc() {
 	if window {
 		app.init(h, client, shell.wake)
 		defer app.stop(h)
-		shell.run({title = "brainfold", width = int(size.x), height = int(size.y), min_width = int(view.MIN_WINDOW.x), min_height = int(view.MIN_WINDOW.y), ui = view.view, user = &m, fonts = faces, fallbacks = fonts.FALLBACKS, data = app.data_host(h)})
+		shell.run({title = msg.text(.App_Name), width = int(size.x), height = int(size.y), min_width = int(view.MIN_WINDOW.x), min_height = int(view.MIN_WINDOW.y), ui = view.view, user = &m, fonts = faces, fallbacks = fonts.FALLBACKS, data = app.data_host(h)})
 		return
 	}
 	app.init(h, client)
@@ -130,12 +135,12 @@ main :: proc() {
 	defer render.headless_destroy(&hl)
 	for i := 0; i < len(steps); i += 1 {
 		if !settle(&hl, h) {
-			fmt.eprintln("the vault did not answer in time")
+			fmt.eprintln(msg.text(.Desk_No_Answer))
 			os.exit(1)
 		}
 		handled, ok := render.headless_step(&hl, steps[:], &i)
 		if !handled {
-			fmt.eprintfln("unknown flag %s", steps[i])
+			fmt.eprintln(msg.textf(.Desk_Unknown_Flag, steps[i]))
 			os.exit(2)
 		}
 		if !ok {
@@ -168,7 +173,7 @@ settle :: proc(hl: ^render.Headless, h: ^app.Host) -> bool {
 
 value :: proc(args: []string, i: ^int) -> string {
 	if i^ + 1 >= len(args) {
-		fmt.eprintfln("%s needs a value", args[i^])
+		fmt.eprintln(msg.textf(.Desk_Needs_Value, args[i^]))
 		os.exit(2)
 	}
 	i^ += 1

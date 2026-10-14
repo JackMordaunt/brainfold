@@ -19,12 +19,15 @@ import "core:strings"
 
 import "jm:ui/shell"
 
+import "../../../msg"
 import "../app"
 import "../cli"
 
 main :: proc() {
+	conf := msg.config_dir()
+	msg.boot(conf, msg.system_tags())
 	if len(os.args) < 2 || len(os.args) > 4 {
-		fmt.eprintln("usage: desk-host <pointer-file | child exe> [title] [WxH]")
+		fmt.eprintln(msg.text(.Host_Usage))
 		os.exit(2)
 	}
 	h := new(app.Host)
@@ -38,7 +41,7 @@ main :: proc() {
 	defer app.stop(h)
 
 	a := shell.Host_App {
-		title  = "brainfold",
+		title  = msg.text(.App_Name),
 		width  = 1280,
 		height = 840,
 		clear  = {255, 255, 255, 255}, // Primer light's --bgColor-default
@@ -55,7 +58,7 @@ main :: proc() {
 		wi, wok := strconv.parse_int(w)
 		hi, hok := strconv.parse_int(ht)
 		if !wok || !hok || wi <= 0 || hi <= 0 {
-			fmt.eprintfln("desk-host: size wants WxH, got %s", os.args[3])
+			fmt.eprintln(msg.textf(.Host_Bad_Size, os.args[3]))
 			os.exit(2)
 		}
 		a.width, a.height = wi, hi

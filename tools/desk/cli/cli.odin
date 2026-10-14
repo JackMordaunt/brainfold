@@ -19,9 +19,18 @@ import "core:strings"
 import "core:time"
 import "core:time/timezone"
 
+import "jm:i18n"
 import "jm:sh"
 
+import "../../../msg"
 import "../shapes"
+
+// said is key in the locale in use, filled into the allocator the caller
+// set. A message with nothing to fill in is the catalog's own text.
+@(private)
+said :: proc(key: msg.Msg, args: ..i18n.Arg) -> string {
+	return msg.textf(key, ..args, allocator = context.allocator)
+}
 
 // TIMEOUT is the longest one CLI call may take; a sync talks to a remote.
 TIMEOUT :: 60 * time.Second
@@ -66,10 +75,10 @@ run :: proc(c: ^Client, args: []string, allocator := context.allocator) -> (stdo
 	copy(argv[1:], args)
 	r := sh.exec(argv, {timeout = TIMEOUT}, allocator)
 	if r.err != nil {
-		return "", false, fmt.aprintf("%s could not be run: %v", argv[0], r.err, allocator = allocator)
+		return "", false, msg.textf(.Could_Not_Run, argv[0], fmt.tprintf("%v", r.err), allocator = allocator)
 	}
 	if r.timed_out {
-		return r.stdout, false, fmt.aprintf("%s took longer than %v", argv[0], TIMEOUT, allocator = allocator)
+		return r.stdout, false, msg.textf(.Took_Too_Long, argv[0], fmt.tprintf("%v", TIMEOUT), allocator = allocator)
 	}
 	return r.stdout, r.ok, r.stderr
 }
@@ -291,7 +300,7 @@ call :: proc(c: ^Client, args: []string, out: ^$T) -> string {
 		return failure(args, stdout, stderr)
 	}
 	if err := json.unmarshal_string(stdout, out); err != nil {
-		return fmt.aprintf("brain %s answered what the desk cannot read: %v", args[0], err)
+		return said(.Cannot_Read, args[0], fmt.tprintf("%v", err))
 	}
 	return ""
 }
@@ -321,7 +330,7 @@ failure :: proc(args: []string, stdout, stderr: string) -> string {
 			return line
 		}
 	}
-	return fmt.aprintf("brain %s failed", strings.join(args, " "))
+	return said(.Command_Failed, strings.join(args, " "))
 }
 
 @(private)
@@ -333,6 +342,7 @@ first_line :: proc(text: string) -> string {
 
 // act carries out a command and says how it went, everything in allocator.
 act :: proc(c: ^Client, cmd: shapes.Command, allocator := context.allocator) -> (o: shapes.Outcome_Result) {
+	msg.refresh()
 	context.allocator = allocator
 	o.done = true
 	switch v in cmd {
@@ -343,58 +353,58 @@ act :: proc(c: ^Client, cmd: shapes.Command, allocator := context.allocator) -> 
 	case shapes.Sync_Now:
 		o = step(c, {"sync"}, "")
 		if o.ok && o.message == "" {
-			o.message = "In sync"
+			o.message = msg.text(.In_Sync)
 		}
 		return
 	case shapes.Reindex:
-		return step(c, {"reindex"}, "Index rebuilt from the markdown")
+		return step(c, {"reindex"}, msg.text(.Index_Rebuilt))
 	case shapes.Run_Doctor:
 		// The host runs it, since its answer is a report, not a message.
-		return {done = true, message = "Doctor runs in the host"}
+		return {done = true, message = msg.text(.Doctor_In_Host)}
 	case shapes.Add_Alias:
-		return step(c, {"alias", "add", v.handle, v.term}, fmt.aprintf("%s is also found as \"%s\" now", v.handle, v.term))
+		return step(c, {"alias", "add", v.handle, v.term}, said(.Alias_Added, v.handle, v.term))
 	case shapes.Remove_Alias:
-		return step(c, {"alias", "remove", v.handle, v.term}, fmt.aprintf("\"%s\" no longer finds %s", v.term, v.handle))
+		return step(c, {"alias", "remove", v.handle, v.term}, said(.Alias_Removed, v.term, v.handle))
 	case shapes.Set_Vault:
 		path := strings.trim_space(v.path)
-		return step(c, {"install", path}, fmt.aprintf("This machine uses the vault at %s", path))
+		return step(c, {"install", path}, said(.Vault_Set, path))
 	case shapes.Write_Bullet:
 		to := v.to != "" ? v.to : "MEMORY"
-		return edit(c, {"--json", "bullet", "write", v.line, "--to", to}, "Written")
+		return edit(c, {"--json", "bullet", "write", v.line, "--to", to}, msg.text(.Word_Written))
 	case shapes.Replace_Bullet:
-		return edit(c, at_args({"--json", "bullet", "replace", v.handle, v.line}, v.at), "Saved")
+		return edit(c, at_args({"--json", "bullet", "replace", v.handle, v.line}, v.at), msg.text(.Word_Saved))
 	case shapes.Drop_Bullet:
-		return edit(c, at_args({"--json", "bullet", "drop", v.handle}, v.at), "Dropped")
+		return edit(c, at_args({"--json", "bullet", "drop", v.handle}, v.at), msg.text(.Word_Dropped))
 	case shapes.Touch_Bullet:
-		return edit(c, at_args({"--json", "bullet", "touch", v.handle}, v.at), "Dated today:")
+		return edit(c, at_args({"--json", "bullet", "touch", v.handle}, v.at), msg.text(.Word_Dated))
 	case shapes.Import:
 		return import_sources(c, v.paths)
 	case shapes.Connect:
 		if hooked := step(c, {"hooks", "on", "--harness", v.agent}, ""); !hooked.ok {
 			return hooked
 		}
-		return step(c, {"recall", "--enable", v.agent}, fmt.aprintf("Connected to %s: it is given the vault as it works, and its transcripts are read", v.agent))
+		return step(c, {"recall", "--enable", v.agent}, said(.Connected_Agent, v.agent))
 	case shapes.New_Vault:
 		path := strings.trim_space(v.path)
-		return step(c, {"install", "--new", path}, fmt.aprintf("A new vault at %s; this machine uses it", path))
+		return step(c, {"install", "--new", path}, said(.Vault_New, path))
 	case shapes.Merge:
 		n, err := place_of(c, v.proposal)
 		if err != "" {
 			return {done = true, message = err}
 		}
-		return edit(c, at_args({"--json", "inbox", "merge", fmt.aprint(n), "--into", v.into, v.line}, v.at), "Merged into")
+		return edit(c, at_args({"--json", "inbox", "merge", fmt.aprint(n), "--into", v.into, v.line}, v.at), msg.text(.Word_Merged))
 	case shapes.Set_Price:
-		return step(c, {"spend", "--price", v.prefix, v.input, v.output}, fmt.aprintf("%s priced at $%s in, $%s out a million tokens", v.prefix, v.input, v.output))
+		return step(c, {"spend", "--price", v.prefix, v.input, v.output}, said(.Priced, v.prefix, v.input, v.output))
 	case shapes.Unlink:
-		return step(c, {"unlink", v.file, fmt.aprint(v.line), v.target}, fmt.aprintf("[[%s]] is plain text now in %s", v.target, v.file))
+		return step(c, {"unlink", v.file, fmt.aprint(v.line), v.target}, said(.Unlinked, v.target, v.file))
 	case shapes.Set_Review:
 		if v.mode != "after" && v.mode != "before" {
-			return {done = true, message = fmt.aprintf("No review mode %q", v.mode)}
+			return {done = true, message = said(.No_Review_Mode, v.mode)}
 		}
-		said := v.mode == "after" ? "Proposals answer finds at once, marked unreviewed" : "Proposals answer finds only once approved"
+		said := v.mode == "after" ? msg.text(.Review_After) : msg.text(.Review_Before)
 		return step(c, {"review", v.mode}, said)
 	}
-	return {done = true, message = "Nothing to do"}
+	return {done = true, message = msg.text(.Nothing_To_Do)}
 }
 
 // settle_proposals approves or drops every proposal named, in order, each found
@@ -402,7 +412,7 @@ act :: proc(c: ^Client, cmd: shapes.Command, allocator := context.allocator) -> 
 // of the rest were done.
 @(private)
 settle_proposals :: proc(c: ^Client, handles: []string, verb, to: string) -> shapes.Outcome_Result {
-	done_word := verb == "approve" ? "Approved" : "Dropped"
+	done_word := verb == "approve" ? msg.text(.Word_Approved) : msg.text(.Word_Dropped_Verb)
 	done := 0
 	first := ""
 	for h in handles {
@@ -426,15 +436,15 @@ settle_proposals :: proc(c: ^Client, handles: []string, verb, to: string) -> sha
 	}
 	switch {
 	case len(handles) == 0:
-		return {done = true, message = "Nothing selected"}
+		return {done = true, message = msg.text(.Nothing_Selected)}
 	case done == len(handles) && done == 1:
-		return {done = true, ok = true, message = fmt.aprintf("%s %s", done_word, handles[0])}
+		return {done = true, ok = true, message = said(.Done_One, done_word, handles[0])}
 	case done == len(handles):
-		return {done = true, ok = true, message = fmt.aprintf("%s %d proposals", done_word, done)}
+		return {done = true, ok = true, message = said(.Done_Many, done_word, done)}
 	case len(handles) == 1:
 		return {done = true, message = first}
 	}
-	return {done = true, message = fmt.aprintf("%s %d of %d; %s", done_word, done, len(handles), first)}
+	return {done = true, message = said(.Done_Partial, done_word, done, len(handles), first)}
 }
 
 // edit runs a bullet command and says how it went: where the bullet is
@@ -455,12 +465,12 @@ edit :: proc(c: ^Client, args: []string, done: string) -> shapes.Outcome_Result 
 		return {done = true, message = failure(args, stdout, stderr)}
 	}
 	if !ok || r.status == "refused" {
-		return {done = true, message = fmt.aprintf("Not written: %s", strings.join(r.errors, "; "))}
+		return {done = true, message = said(.Not_Written, strings.join(r.errors, "; "))}
 	}
 	if r.file != "" {
-		return {done = true, ok = true, message = fmt.aprintf("%s %s at %s:%d", done, r.handle, r.file, r.line)}
+		return {done = true, ok = true, message = said(.Written_At, done, r.handle, r.file, fmt.tprint(r.line))}
 	}
-	return {done = true, ok = true, message = fmt.aprintf("%s %s", done, r.handle)}
+	return {done = true, ok = true, message = said(.Written_Handle, done, r.handle)}
 }
 
 // import_sources imports each path in turn and says how many memories
@@ -481,11 +491,11 @@ import_sources :: proc(c: ^Client, paths: []string) -> shapes.Outcome_Result {
 	}
 	switch {
 	case proposed == 0:
-		return {done = true, ok = true, message = fmt.aprintf("Nothing new in %d memories: the vault has them already", memories)}
+		return {done = true, ok = true, message = said(.Import_Nothing, memories)}
 	case proposed == 1:
-		return {done = true, ok = true, message = "1 memory proposed; it waits in the inbox"}
+		return {done = true, ok = true, message = msg.text(.Import_One)}
 	}
-	return {done = true, ok = true, message = fmt.aprintf("%d memories proposed; they wait in the inbox", proposed)}
+	return {done = true, ok = true, message = said(.Import_Many, proposed)}
 }
 
 // at_args is args, then --at at when a bullet's place is named.
@@ -512,7 +522,7 @@ place_of :: proc(c: ^Client, handle: string) -> (n: int, err: string) {
 			return p.n, ""
 		}
 	}
-	return 0, fmt.aprintf("%s is no longer in the inbox", handle)
+	return 0, said(.Gone_Inbox, handle)
 }
 
 // step runs one CLI call for a command: said on success, or the first

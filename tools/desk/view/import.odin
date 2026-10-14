@@ -1,6 +1,5 @@
 package desk_view
 
-import "core:fmt"
 import "core:path/filepath"
 import "core:strings"
 
@@ -27,10 +26,10 @@ inbox_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	st := ui.stack_open(gtx)
 	defer ui.close(&st)
 	busy := waiting_on(m, .Import)
-	if primer.button(gtx, "Import", .Default, .Medium, leading = .Download, loading = busy) && !busy {
+	if primer.button(gtx, tr(m, .Import), .Default, .Medium, leading = .Download, loading = busy) && !busy {
 		open_import(m)
 	}
-	primer.tooltip(gtx, "Bring in what Claude Code and Gemini CLI remembered on their own. Each memory waits here as a proposal; what the vault already says is left out.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+	primer.tooltip(gtx, tr(m, .Import_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 }
 
 // open_import opens the dialog with every source that has something new
@@ -85,9 +84,9 @@ import_dialog :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		}
 	}
 	go_, cancel: bool
-	label := fresh == 1 ? "Propose 1 memory" : fmt.tprintf("Propose %d memories", fresh)
-	footer := []primer.Dialog_Button{{content = "Cancel", clicked = &cancel}, {content = label, type = .Primary, disabled = fresh == 0, clicked = &go_}}
-	dl := primer.dialog_open(gtx, &ip.open, "Import memories", "What your agents remembered on their own. Each becomes a proposal in the inbox, for you to approve or drop.", footer, width = .Large)
+	label := tf(m, .Propose_Memories, fresh)
+	footer := []primer.Dialog_Button{{content = tr(m, .Cancel), clicked = &cancel}, {content = label, type = .Primary, disabled = fresh == 0, clicked = &go_}}
+	dl := primer.dialog_open(gtx, &ip.open, tr(m, .Import_Memories), tr(m, .Import_Body), footer, width = .Large)
 	if dl.visible {
 		ui.column(gtx, gap = 8, align = .Fill)
 		switch {
@@ -96,18 +95,18 @@ import_dialog :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		case list.error != "":
 			primer.inline_message(gtx, list.error, .Critical, .Small)
 		case len(list.sources) == 0:
-			primer.text(gtx, "No agent on this machine has saved memories of its own: Claude Code keeps them per project, Gemini CLI in ~/.gemini/GEMINI.md.", .Small, color = s[.Fg_Color_Muted])
+			primer.text(gtx, tr(m, .No_Memories), .Small, color = s[.Fg_Color_Muted])
 		case:
 			for src, i in list.sources {
 				on := ticked(m, src.path) >= 0
 				name := src.label
 				if src.kind == "claude" {
 					project := filepath.base(src.label)
-					name = fmt.tprintf("Claude Code · %s", project == "~" ? "home folder" : project)
+					name = tf(m, .Claude_Project, project == "~" ? tr(m, .Home_Folder) : project)
 				} else if src.kind == "gemini" {
-					name = "Gemini CLI"
+					name = tr(m, .Gemini_Cli)
 				}
-				caption := src.new == 0 ? fmt.tprintf("%d memories, all in the vault already", src.memories) : fmt.tprintf("%d new of %d memories · %s", src.new, src.memories, short_path(src.label))
+				caption := src.new == 0 ? tf(m, .Memories_Known, src.memories) : tf(m, .Memories_New, src.new, src.memories, short_path(src.label))
 				if primer.checkbox(gtx, &on, name, caption = caption, state = src.new == 0 ? .Disabled : .Live, key = u64(i + 1)) {
 					if j := ticked(m, src.path); on && j < 0 {
 						append(&ip.ticked, strings.clone(src.path, m.allocator))

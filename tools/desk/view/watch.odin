@@ -1,6 +1,5 @@
 package desk_view
 
-import "core:fmt"
 import "core:math"
 import "core:strconv"
 import "core:strings"
@@ -13,6 +12,7 @@ import "jm:ui/plot"
 import plot_primer "jm:ui/plot/primer"
 import "jm:ui/primer"
 
+import "../../../msg"
 import "../shapes"
 
 // --- Activity ------------------------------------------------------------------
@@ -28,7 +28,7 @@ page_activity :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		loading(gtx, 6)
 		return
 	}
-	if failed(gtx, ledger.error) || failed(gtx, log.error) {
+	if failed(gtx, m, ledger.error) || failed(gtx, m, log.error) {
 		return
 	}
 	lookups, answered, returned, saved: int
@@ -48,10 +48,10 @@ page_activity :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		gtx,
 		body_width(m),
 		{
-			{"Lookups", thousands(lookups), fmt.tprintf("%d sessions", sessions)},
-			{"Answered", percent(answered, lookups), fmt.tprintf("%s of %s found something", thousands(answered), thousands(lookups))},
-			{"Tokens served", compact(returned), fmt.tprintf("%s a lookup", compact(returned / max(lookups, 1)))},
-			{"Tokens saved", compact(max(saved, 0)), fmt.tprintf("against reading %s each session", compact(ledger.baseline_tokens))},
+			{tr(m, .Stat_Lookups), digits(m, lookups), tf(m, .Sessions, sessions)},
+			{tr(m, .Stat_Answered), percent(answered, lookups, msg.locale(&m.strings)), tf(m, .Found_Of, answered, lookups)},
+			{tr(m, .Stat_Tokens_Served), compact(returned, msg.locale(&m.strings)), tf(m, .Per_Lookup, compact(returned / max(lookups, 1), msg.locale(&m.strings)))},
+			{tr(m, .Stat_Tokens_Saved), compact(max(saved, 0), msg.locale(&m.strings)), tf(m, .Against_Reading, compact(ledger.baseline_tokens, msg.locale(&m.strings)))},
 		},
 		short,
 	)
@@ -72,17 +72,17 @@ page_activity :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	arrange(gtx, m)
 	w := split(gtx, m, 0.5, 0.5)
 	{
-		pane(gtx, m, .Lookups, w[0], "Recent lookups", len(log.recent))
+		pane(gtx, m, .Lookups, w[0], tr(m, .Recent_Lookups), len(log.recent))
 		if len(log.recent) == 0 {
-			empty(gtx, "No lookups yet", "Lookups show here as agents make them.", .Search)
+			empty(gtx, tr(m, .No_Lookups), tr(m, .No_Lookups_Body), .Search)
 		} else {
-			l := primer.action_list_open(gtx, .Full, dividers = true, name = "Recent lookups")
+			l := primer.action_list_open(gtx, .Full, dividers = true, name = tr(m, .Recent_Lookups))
 			for r in log.recent {
-				hits := r.hits == 0 ? "no hits" : r.hits == 1 ? "1 hit" : fmt.tprintf("%d hits", r.hits)
+				hits := r.hits == 0 ? tr(m, .No_Hits) : tf(m, .Hits, r.hits)
 				// Wrapped, not truncated: a truncated label drew its ellipsis
 				// against the trailing count. Who and when go under it, so a
 				// long query does not squeeze them into a column of their own.
-				if primer.action_list_item(&l, r.query, description = fmt.tprintf("%s · %s", r.caller, clock(r.ts)), description_variant = .Block, leading = r.hits == 0 ? .Alert : .Search, trailing_text = hits) {
+				if primer.action_list_item(&l, r.query, description = tf(m, .Join_Dot, r.caller, clock(r.ts)), description_variant = .Block, leading = r.hits == 0 ? .Alert : .Search, trailing_text = hits) {
 					// A lookup leads to what was said about it.
 					go(m, .Recall)
 					ui.text_set(&m.search, r.query)
@@ -92,13 +92,13 @@ page_activity :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			primer.action_list_close(&l)
 		}
 	}
-	pane(gtx, m, .Days, w[1], "Most served", len(ledger.top_bullets))
+	pane(gtx, m, .Days, w[1], tr(m, .Most_Served), len(ledger.top_bullets))
 	if len(ledger.top_bullets) == 0 {
-		empty(gtx, "Nothing served yet", "The bullets agents are given most show here.", .Book)
+		empty(gtx, tr(m, .Nothing_Served), tr(m, .Nothing_Served_Body), .Book)
 	} else {
-		l := primer.action_list_open(gtx, .Full, dividers = true, name = "Most served")
+		l := primer.action_list_open(gtx, .Full, dividers = true, name = tr(m, .Most_Served))
 		for b in ledger.top_bullets {
-			if primer.action_list_item(&l, b.handle, description = fmt.tprintf("%s · %d sessions", b.file, b.sessions), description_variant = .Block, leading = .Book, trailing_text = fmt.tprintf("%d×", b.served)) {
+			if primer.action_list_item(&l, b.handle, description = tf(m, .File_Sessions, b.file, b.sessions), description_variant = .Block, leading = .Book, trailing_text = tf(m, .Times, b.served)) {
 				// A bullet leads to itself, to read or correct.
 				open_bullet(m, b.handle)
 			}
@@ -109,11 +109,11 @@ page_activity :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		base.divider(gtx, s[.Border_Color_Default], key = 0xca11)
 		{
 			ui.inset(gtx, {16, 12, 16, 4}, key = 0xca12)
-			primer.heading(gtx, "Who asks", 3, .Small)
+			primer.heading(gtx, tr(m, .Who_Asks), 3, .Small)
 		}
-		c := primer.action_list_open(gtx, .Full, name = "Callers", key = 0xca13)
+		c := primer.action_list_open(gtx, .Full, name = tr(m, .Callers), key = 0xca13)
 		for x in log.callers {
-			primer.action_list_item(&c, x.caller, description = fmt.tprintf("%s queries in %s sessions · %s missed · %s served", thousands(x.queries), thousands(x.sessions), thousands(x.misses), bytes(x.bytes)), description_variant = .Block, leading = .Copilot)
+			primer.action_list_item(&c, x.caller, description = tf(m, .Caller_Line, x.queries, x.sessions, x.misses, bytes(x.bytes)), description_variant = .Block, leading = .Copilot)
 		}
 		primer.action_list_close(&c)
 	}
@@ -152,14 +152,14 @@ trend_charts :: proc(gtx: ^ui.Ctx, m: ^Model, ledger: ^shapes.Ledger_Result, w: 
 		saved[k] = total
 	}
 	{
-		pane(gtx, m, .Chart_Lookups, w[0], "Lookups a day", scroll = false)
+		pane(gtx, m, .Chart_Lookups, w[0], tr(m, .Lookups_A_Day), scroll = false)
 		ui.inset(gtx, {16, 8, 16, 8})
 		if n == 0 {
-			empty(gtx, "No lookups yet", "", .Pulse)
+			empty(gtx, tr(m, .No_Lookups), "", .Pulse)
 		} else {
-			series := []plot.Bar_Series{{name = "Answered", values = answered, slot = 0}, {name = "Missed", values = missed, slot = 3}}
+			series := []plot.Bar_Series{{name = tr(m, .Series_Answered), values = answered, slot = 0}, {name = tr(m, .Series_Missed), values = missed, slot = 3}}
 			chart := plot.Bar_Chart {
-				label      = "Lookups a day, answered and missed",
+				label      = tr(m, .Chart_Lookups),
 				categories = days,
 				series     = series,
 				stacked    = true,
@@ -167,15 +167,15 @@ trend_charts :: proc(gtx: ^ui.Ctx, m: ^Model, ledger: ^shapes.Ledger_Result, w: 
 			plot.bar_chart(gtx, &chart, &style)
 		}
 	}
-	pane(gtx, m, .Chart_Saved, w[1], "Tokens saved, so far", scroll = false)
+	pane(gtx, m, .Chart_Saved, w[1], tr(m, .Tokens_Saved_So_Far), scroll = false)
 	ui.inset(gtx, {16, 8, 16, 8})
 	if n < 2 {
-		empty(gtx, "A day more, and a trend", "Tokens saved draw as a line once there are two days of lookups.", .Graph)
+		empty(gtx, tr(m, .Trend_Needs_Two), tr(m, .Trend_Needs_Two_Body), .Graph)
 		return
 	}
-	series := []plot.Line_Series{{name = "Tokens saved", ys = saved, slot = 1}}
+	series := []plot.Line_Series{{name = tr(m, .Series_Tokens_Saved), ys = saved, slot = 1}}
 	chart := plot.Line_Chart {
-		label  = "Tokens saved, so far",
+		label  = tr(m, .Tokens_Saved_So_Far),
 		xs     = xs,
 		series = series,
 		x      = {kind = .Time},
@@ -210,7 +210,7 @@ page_misses :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	arrange(gtx, m)
 	w := split_list(gtx, m)
 	if !ready(st) {
-		pane(gtx, m, .Misses, w[0], "Still missing")
+		pane(gtx, m, .Misses, w[0], tr(m, .Still_Missing))
 		loading(gtx)
 		return
 	}
@@ -224,16 +224,16 @@ page_misses :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		current = chosen(&m.miss)
 	}
 	list: {
-		pane(gtx, m, .Misses, w[0], "Still missing", len(log.backlog))
-		if failed(gtx, log.error) {
+		pane(gtx, m, .Misses, w[0], tr(m, .Still_Missing), len(log.backlog))
+		if failed(gtx, m, log.error) {
 			return
 		}
 		if len(log.backlog) == 0 {
-			empty(gtx, "Nothing keeps missing", "Every query your agents asked lately found something.", .Check_Circle)
+			empty(gtx, tr(m, .Nothing_Missing), tr(m, .Nothing_Missing_Body), .Check_Circle)
 		}
-		l := primer.action_list_open(gtx, .Full, dividers = true, name = "Still missing")
+		l := primer.action_list_open(gtx, .Full, dividers = true, name = tr(m, .Still_Missing))
 		for x in log.backlog {
-			if primer.action_list_item(&l, x.query, description = fmt.tprintf("missed %d× · last %s", x.misses, clock(x.last)), description_variant = .Block, truncate = true, leading = .Question, active = x.query == current) {
+			if primer.action_list_item(&l, x.query, description = tf(m, .Missed_Times, x.misses, clock(x.last)), description_variant = .Block, truncate = true, leading = .Question, active = x.query == current) {
 				choose(&m.miss, x.query)
 			}
 		}
@@ -242,11 +242,11 @@ page_misses :: proc(gtx: ^ui.Ctx, m: ^Model) {
 			base.divider(gtx, s[.Border_Color_Default], key = 0xa5)
 			ui.inset(gtx, {16, 12, 16, 4}, key = 0xa6)
 			ui.row(gtx, gap = 8, align = .Center)
-			primer.heading(gtx, "Answered since", 3, .Small)
-			primer.counter_label(gtx, fmt.tprint(len(log.answered)))
+			primer.heading(gtx, tr(m, .Answered_Since), 3, .Small)
+			primer.counter_label(gtx, digits(m, len(log.answered)))
 		}
 		if len(log.answered) > 0 {
-			a := primer.action_list_open(gtx, .Full, name = "Answered since", key = 0xa7)
+			a := primer.action_list_open(gtx, .Full, name = tr(m, .Answered_Since), key = 0xa7)
 			for q in log.answered {
 				primer.action_list_item(&a, q, truncate = true, leading = .Check)
 			}
@@ -257,9 +257,9 @@ page_misses :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		pane(gtx, m, .Miss_Detail, w[1], bar = current != "" ? miss_actions : nil)
 		if current == "" {
 			if len(log.backlog) == 0 {
-				empty(gtx, "Nothing to look into", "When a query finds nothing, it shows here with what the transcripts say about it.", .Question)
+				empty(gtx, tr(m, .Nothing_To_Look), tr(m, .Nothing_To_Look_Body), .Question)
 			} else {
-				empty(gtx, "Nothing to look into", "Choose a miss to see what the transcripts say about it.", .Question)
+				empty(gtx, tr(m, .Nothing_To_Look), tr(m, .Nothing_To_Look_Choose), .Question)
 			}
 			return
 		}
@@ -278,20 +278,20 @@ miss_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	{
 		st := ui.stack_open(gtx)
 		defer ui.close(&st)
-		if primer.button(gtx, "Write", .Primary, .Small, leading = .Plus) {
+		if primer.button(gtx, tr(m, .Write), .Primary, .Small, leading = .Plus) {
 			draft(m, query, query)
 		}
-		primer.tooltip(gtx, "Write a bullet that answers it, named after the query.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+		primer.tooltip(gtx, tr(m, .Write_Bullet_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 	}
 	{
 		st := ui.stack_open(gtx)
 		defer ui.close(&st)
-		if primer.button(gtx, "Search", .Default, .Small, leading = .Comment_Discussion) {
+		if primer.button(gtx, tr(m, .Search), .Default, .Small, leading = .Comment_Discussion) {
 			go(m, .Recall)
 			ui.text_set(&m.search, query)
 			m.turn.len = 0
 		}
-		primer.tooltip(gtx, "Search Recall for what your agents said about it.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+		primer.tooltip(gtx, tr(m, .Search_Recall_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 	}
 }
 
@@ -303,21 +303,21 @@ miss_detail :: proc(gtx: ^ui.Ctx, m: ^Model, query: string) {
 		ui.inset(gtx, {16, 16, 16, 8})
 		ui.column(gtx, gap = 8, align = .Fill)
 		primer.heading(gtx, query, 2, .Small)
-		primer.text(gtx, "No bullet answers this yet. If the transcripts below settle it, propose the bullet; if a bullet says it in other words, add the words as an alias.", .Small, color = s[.Fg_Color_Muted])
+		primer.text(gtx, tr(m, .No_Bullet_Yet), .Small, color = s[.Fg_Color_Muted])
 	}
 	res, st := ui.need(gtx, shapes.Recall{terms = query, limit = 10}, shapes.Recall_Result)
 	if !ready(st) {
 		loading(gtx, 3)
 		return
 	}
-	if failed(gtx, res.error) {
+	if failed(gtx, m, res.error) {
 		return
 	}
 	if len(res.turns) == 0 {
-		empty(gtx, "Nothing said about it", "No transcript mentions this either; it may want a bullet from what you know.", .Comment_Discussion)
+		empty(gtx, tr(m, .Nothing_Said), tr(m, .Nothing_Said_Body), .Comment_Discussion)
 		return
 	}
-	l := primer.action_list_open(gtx, .Full, dividers = true, heading = "Said about it", heading_level = 3)
+	l := primer.action_list_open(gtx, .Full, dividers = true, heading = tr(m, .Said_About), heading_level = 3)
 	for t in res.turns {
 		if primer.action_list_item(&l, t.title, description = t.snippet, description_variant = .Block, leading = .Comment_Discussion, trailing_text = t.agent) {
 			go(m, .Recall)
@@ -334,7 +334,7 @@ miss_detail :: proc(gtx: ^ui.Ctx, m: ^Model, query: string) {
 recall_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	terms := strings.trim_space(ui.text_string(&m.search))
 	searching := terms != "" && chosen(&m.shown) != terms
-	primer.text_input(gtx, &m.search, placeholder = "What was said about…", size = .Large, leading = .Search, loading = searching, name = "Search transcripts")
+	primer.text_input(gtx, &m.search, placeholder = tr(m, .Search_Placeholder), size = .Large, leading = .Search, loading = searching, name = tr(m, .Search_Transcripts))
 }
 
 // page_recall is the turns that match, and the conversation around the
@@ -367,19 +367,19 @@ page_recall :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		current = chosen(&m.turn)
 	}
 	list: {
-		pane(gtx, m, .Turns, w[0], "Turns", ready(st) && terms != "" ? len(turns) : -1)
+		pane(gtx, m, .Turns, w[0], tr(m, .Turns), ready(st) && terms != "" ? len(turns) : -1)
 		switch {
 		case terms == "":
-			empty(gtx, "Search what your agents said", "Every Claude Code, pi and Codex transcript on this machine, ranked by how well it matches.", .Comment_Discussion)
+			empty(gtx, tr(m, .Search_Agents), tr(m, .Search_Agents_Body), .Comment_Discussion)
 		case !ready(st):
 			loading(gtx, 4)
-		case failed(gtx, res.error):
+		case failed(gtx, m, res.error):
 		case len(turns) == 0:
-			empty(gtx, "Nothing said about that", "Try fewer words, or another name for it.", .Search)
+			empty(gtx, tr(m, .Nothing_Said_That), tr(m, .Nothing_Said_That_Body), .Search)
 		case:
-			l := primer.action_list_open(gtx, .Full, dividers = true, name = "Turns")
+			l := primer.action_list_open(gtx, .Full, dividers = true, name = tr(m, .Turns))
 			for t in turns {
-				if primer.action_list_item(&l, t.title, description = fmt.tprintf("%s · %s · %s", t.agent, t.date, t.snippet), description_variant = .Block, leading = .Comment_Discussion, active = t.id == current) {
+				if primer.action_list_item(&l, t.title, description = tf(m, .Join_Dot3, t.agent, t.date, t.snippet), description_variant = .Block, leading = .Comment_Discussion, active = t.id == current) {
 					choose(&m.turn, t.id)
 					m.pin.len = 0
 					m.panes[.Around] = {}
@@ -392,7 +392,7 @@ page_recall :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	{
 		pane(gtx, m, .Around, w[1])
 		if current == "" || (len(turns) == 0 && !pinned) {
-			empty(gtx, "The conversation shows here", "Choose a turn to read it in the exchange that produced it.", .Comment_Discussion)
+			empty(gtx, tr(m, .Conversation_Here), tr(m, .Conversation_Here_Body), .Comment_Discussion)
 			return
 		}
 		around(gtx, m, current)
@@ -408,14 +408,14 @@ around :: proc(gtx: ^ui.Ctx, m: ^Model, id: string) {
 		loading(gtx, 6)
 		return
 	}
-	if failed(gtx, a.error) {
+	if failed(gtx, m, a.error) {
 		return
 	}
 	detail: {
 		ui.inset(gtx, {16, 16, 16, 4})
 		ui.column(gtx, gap = 4, align = .Fill)
-		primer.heading(gtx, a.title != "" ? a.title : "Untitled session", 2, .Small)
-		primer.text(gtx, fmt.tprintf("session %s", a.session), .Small, color = s[.Fg_Color_Muted])
+		primer.heading(gtx, a.title != "" ? a.title : tr(m, .Untitled_Session), 2, .Small)
+		primer.text(gtx, tf(m, .Session_Id, a.session), .Small, color = s[.Fg_Color_Muted])
 	}
 	for t, i in a.turns {
 		ui.inset(gtx, {16, 8, 16, 8}, key = u64(i + 1))
@@ -435,7 +435,7 @@ around :: proc(gtx: ^ui.Ctx, m: ^Model, id: string) {
 			ts, _ := strings.replace_all(t.ts, "T", " ", context.temp_allocator)
 			primer.text(gtx, clock(ts), .Small, color = s[.Fg_Color_Muted])
 			if t.hit {
-				primer.label(gtx, "the match", .Primary, key = 1)
+				primer.label(gtx, tr(m, .The_Match), .Primary, key = 1)
 			}
 		}
 		primer.text(gtx, t.body, key = 2)

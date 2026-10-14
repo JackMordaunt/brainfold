@@ -11,15 +11,15 @@ import "jm:ui"
 import "jm:ui/ops"
 
 // FALLBACKS are the faces tried, in order, for a character the sans
-// lacks: arrows, check marks and the like, which agents' transcripts are
-// full of and Noto Sans does not draw. Their ids follow the mono face's.
-FALLBACKS :: []ops.Font_Id{4, 5}
+// lacks. 4 and 5 are arrows and symbols. 6 to 10 are the scripts the
+// sans does not cover: Arabic, Devanagari, Bengali, Thai, then CJK.
+FALLBACKS :: []ops.Font_Id{4, 5, 6, 7, 8, 9, 10}
 
 // fonts is SF on macOS, one variable font drawn at each weight; Noto Sans
 // regular, medium and bold where it is installed; else jm:ui's default
 // font, whose static outlines ignore the weight.
 fonts :: proc(allocator := context.allocator) -> []ops.Font_Ref {
-	out := make([]ops.Font_Ref, 6, allocator)
+	out := make([]ops.Font_Ref, 11, allocator)
 	SF :: "/System/Library/Fonts/SFNS.ttf"
 	NOTO :: "/usr/share/fonts/noto/NotoSans-"
 	weights := [3]f32{400, 500, 600}
@@ -41,9 +41,46 @@ fonts :: proc(allocator := context.allocator) -> []ops.Font_Ref {
 	out[3] = {3, out[0].path, 400}
 	// A fallback not installed stands in as the sans, which draws nothing
 	// more but keeps the ids.
-	extra := [2]string{"/usr/share/fonts/noto/NotoSansMath-Regular.ttf", "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf"}
+	extra := [?]string{
+		"/usr/share/fonts/noto/NotoSansMath-Regular.ttf",
+		"/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
+		"/usr/share/fonts/noto/NotoSansArabic-Regular.ttf",
+		"/usr/share/fonts/noto/NotoSansDevanagari-Regular.ttf",
+		"/usr/share/fonts/noto/NotoSansBengali-Regular.ttf",
+		"/usr/share/fonts/noto/NotoSansThai-Regular.ttf",
+		"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+	}
+	// The same faces Atlas looks for on macOS and Windows, after the Linux path.
+	alt := [?]string{
+		"",
+		"",
+		"/System/Library/Fonts/GeezaPro.ttc",
+		"/System/Library/Fonts/Kohinoor.ttc",
+		"/System/Library/Fonts/KohinoorBangla.ttc",
+		"/System/Library/Fonts/Thonburi.ttc",
+		"/System/Library/Fonts/PingFang.ttc",
+	}
+	win := [?]string{
+		"",
+		"",
+		"C:/Windows/Fonts/tahoma.ttf",
+		"C:/Windows/Fonts/Nirmala.ttc",
+		"C:/Windows/Fonts/Nirmala.ttc",
+		"C:/Windows/Fonts/LeelawUI.ttf",
+		"C:/Windows/Fonts/msyh.ttc",
+	}
 	for f, i in extra {
-		out[4 + i] = {ops.Font_Id(4 + i), os.exists(f) ? f : out[0].path, 400}
+		path := f
+		if !os.exists(path) && alt[i] != "" && os.exists(alt[i]) {
+			path = alt[i]
+		}
+		if !os.exists(path) && win[i] != "" && os.exists(win[i]) {
+			path = win[i]
+		}
+		if !os.exists(path) {
+			path = out[0].path
+		}
+		out[4 + i] = {ops.Font_Id(4 + i), path, 400}
 	}
 	for mono in ([3]string{"/System/Library/Fonts/SFNSMono.ttf", "/usr/share/fonts/noto/NotoSansMono-Regular.ttf", "/usr/share/fonts/TTF/DejaVuSansMono.ttf"}) {
 		if os.exists(mono) {

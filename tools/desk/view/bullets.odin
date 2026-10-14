@@ -46,10 +46,10 @@ editor_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	f := &e.frame
 	ui.row(gtx, gap = 8, align = .Center)
 	if e.drafting {
-		if fix_button(gtx, "Write", "Write the bullet into the vault.", .Primary, .Check, loading = waiting_on(m, .Write_Bullet), inactive = !f.ok) && f.ok {
+		if fix_button(gtx, tr(m, .Write), tr(m, .Write_Bullet), .Primary, .Check, loading = waiting_on(m, .Write_Bullet), inactive = !f.ok) && f.ok {
 			send(gtx, m, .Write_Bullet, {strings.trim_space(ui.text_string(&e.handle))}, f.line, f.to)
 		}
-		if primer.button(gtx, "Discard", .Default, inactive = f.busy) && !f.busy {
+		if primer.button(gtx, tr(m, .Discard), .Default, inactive = f.busy) && !f.busy {
 			e.drafting = false
 			e.loaded.len = 0
 		}
@@ -58,14 +58,14 @@ editor_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	if f.handle == "" {
 		return
 	}
-	if primer.button(gtx, "Save", .Primary, leading = .Check, loading = waiting_on(m, .Replace_Bullet), inactive = !f.ok) && f.ok {
+	if primer.button(gtx, tr(m, .Save), .Primary, leading = .Check, loading = waiting_on(m, .Replace_Bullet), inactive = !f.ok) && f.ok {
 		send(gtx, m, .Replace_Bullet, {f.handle, strings.trim_space(ui.text_string(&e.handle))}, f.line, place(f.current))
 	}
-	if primer.button(gtx, "Revert", .Default, inactive = !f.dirty || f.busy) && f.dirty && !f.busy {
+	if primer.button(gtx, tr(m, .Revert), .Default, inactive = !f.dirty || f.busy) && f.dirty && !f.busy {
 		load(e, f.current)
 	}
 	ui.fill_space(gtx)
-	if primer.button(gtx, "Drop", .Danger, leading = .Trash, loading = waiting_on(m, .Drop_Bullet), inactive = f.busy) && !f.busy {
+	if primer.button(gtx, tr(m, .Drop), .Danger, leading = .Trash, loading = waiting_on(m, .Drop_Bullet), inactive = f.busy) && !f.busy {
 		e.dropping = true
 	}
 }
@@ -160,27 +160,27 @@ changed :: proc(e: ^Editor, b: shapes.Bullet) -> bool {
 bullets_control :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	st := ui.stack_open(gtx)
 	defer ui.close(&st)
-	if primer.button(gtx, "New", .Primary, .Medium, leading = .Plus) {
+	if primer.button(gtx, tr(m, .New), .Primary, .Medium, leading = .Plus) {
 		draft(m)
 	}
-	primer.tooltip(gtx, "Write a bullet by hand: a handle, the names it answers to, one fact, where it came from and when.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+	primer.tooltip(gtx, tr(m, .New_Bullet_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 }
 
 // bullets_bar is the list's search and file filter, fixed over it.
 bullets_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	ui.column(gtx, gap = 8, align = .Fill)
-	primer.text_input(gtx, &m.filter, placeholder = "Search bullets", size = .Small, leading = .Search, name = "Search bullets")
+	primer.text_input(gtx, &m.filter, placeholder = tr(m, .Search_Bullets), size = .Small, leading = .Search, name = tr(m, .Search_Bullets))
 	list, st := ui.need(gtx, shapes.Bullets{}, shapes.Bullets_Result)
 	if !ready(st) {
 		return
 	}
 	options := make([]primer.Select_Option, len(list.files) + 1, context.temp_allocator)
-	options[0] = {label = "Every file"}
+	options[0] = {label = tr(m, .Every_File)}
 	for f, i in list.files {
 		options[i + 1] = {label = f}
 	}
 	m.file_filter = clamp(m.file_filter, 0, len(list.files))
-	primer.select(gtx, options, &m.file_filter, size = .Small, block = true, name = "File")
+	primer.select(gtx, options, &m.file_filter, size = .Small, block = true, name = tr(m, .File))
 }
 
 // Haystacks is each bullet's handle, aliases and fact in lower case, what
@@ -243,7 +243,7 @@ page_bullets :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	arrange(gtx, m)
 	w := split_list(gtx, m)
 	if !ready(st) {
-		pane(gtx, m, .Bullets, w[0], "Bullets")
+		pane(gtx, m, .Bullets, w[0], tr(m, .Page_Bullets))
 		loading(gtx, 6)
 		return
 	}
@@ -276,12 +276,12 @@ page_bullets :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		}
 	}
 	list_pane: {
-		pane(gtx, m, .Bullets, w[0], "Bullets", len(shown), bar = bullets_bar, scroll = false)
-		if failed(gtx, list.error) {
+		pane(gtx, m, .Bullets, w[0], tr(m, .Page_Bullets), len(shown), bar = bullets_bar, scroll = false)
+		if failed(gtx, m, list.error) {
 			break list_pane
 		}
 		if len(shown) == 0 {
-			empty(gtx, "No bullet matches", "Try fewer words, or every file.", .Search)
+			empty(gtx, tr(m, .No_Bullet_Matches), tr(m, .No_Bullet_Matches_Body), .Search)
 			break list_pane
 		}
 		// Only the rows in view are laid out: 300 bullets wrapped in full
@@ -297,7 +297,7 @@ page_bullets :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	story := tabs && m.bullet_tab == 1
 	pane(gtx, m, .Bullet, w[1], bar = tabs ? bullet_tabs : nil, scroll = !story, footer = editing && !story ? editor_actions : nil)
 	if !editing {
-		empty(gtx, "Nothing chosen", "Choose a bullet to read and edit it, or write a new one.", .Book)
+		empty(gtx, tr(m, .Nothing_Chosen), tr(m, .Nothing_Chosen_Body), .Book)
 		return
 	}
 	if story {
@@ -376,51 +376,51 @@ editor :: proc(gtx: ^ui.Ctx, m: ^Model, list: ^shapes.Bullets_Result, current: ^
 	{
 		ui.wrap(gtx, gap = 8, line_gap = 4, align = .Center)
 		if e.drafting {
-			primer.heading(gtx, "New bullet", 2, .Medium)
+			primer.heading(gtx, tr(m, .New_Bullet), 2, .Medium)
 		} else if current != nil {
 			primer.heading(gtx, current.handle, 2, .Medium)
-			primer.label(gtx, fmt.tprintf("%s:%d", current.file, current.line), .Secondary)
+			primer.label(gtx, tf(m, .Place, current.file, fmt.tprint(current.line)), .Secondary)
 			if days := days_since(current.date); days >= 0 {
-				primer.label(gtx, age(days), days > 90 ? .Attention : .Secondary, key = 1)
+				primer.label(gtx, age(m, days), days > 90 ? .Attention : .Secondary, key = 1)
 			}
 		}
 	}
 	if e.drafting && len(list.files) > 0 {
 		ui.column(gtx, gap = 4, align = .Fill, key = 1)
-		primer.text(gtx, "File", .Small, .Medium, color = s[.Fg_Color_Muted])
+		primer.text(gtx, tr(m, .File), .Small, .Medium, color = s[.Fg_Color_Muted])
 		options := make([]primer.Select_Option, len(list.files), context.temp_allocator)
 		for f, i in list.files {
 			options[i] = {label = f}
 		}
 		e.to = clamp(e.to, 0, len(list.files) - 1)
-		primer.select(gtx, options, &e.to, size = .Small, block = true, name = "File", key = 2)
+		primer.select(gtx, options, &e.to, size = .Small, block = true, name = tr(m, .File), key = 2)
 	}
-	field(gtx, "Handle", "the name it is found by", &e.handle, key = 3)
+	field(gtx, tr(m, .Handle), tr(m, .Handle_Ph_Bullet), &e.handle, key = 3)
 	{
 		// Wrapped, not one line: an alias list runs long, and a field that
 		// scrolls sideways hides most of it.
 		ui.column(gtx, gap = 4, align = .Fill, key = 4)
-		primer.text(gtx, "Aliases", .Small, .Medium, color = s[.Fg_Color_Muted])
-		primer.textarea(gtx, &e.aliases, placeholder = "other names, comma-separated", rows = 1, resize = .None, auto_size = true, block = true, name = "Aliases")
+		primer.text(gtx, tr(m, .Aliases), .Small, .Medium, color = s[.Fg_Color_Muted])
+		primer.textarea(gtx, &e.aliases, placeholder = tr(m, .Aliases_Ph), rows = 1, resize = .None, auto_size = true, block = true, name = tr(m, .Aliases))
 	}
 	{
 		ui.column(gtx, gap = 4, align = .Fill, key = 5)
-		primer.text(gtx, "Fact", .Small, .Medium, color = s[.Fg_Color_Muted])
-		primer.textarea(gtx, &e.fact, placeholder = "One fact, stated once", rows = 4, resize = .None, block = true, name = "Fact")
+		primer.text(gtx, tr(m, .Fact), .Small, .Medium, color = s[.Fg_Color_Muted])
+		primer.textarea(gtx, &e.fact, placeholder = tr(m, .Fact_Ph), rows = 4, resize = .None, block = true, name = tr(m, .Fact))
 	}
-	field(gtx, "Source", "a file, commit or session", &e.source, key = 6)
+	field(gtx, tr(m, .Source), tr(m, .Source_Ph_Bullet), &e.source, key = 6)
 	{
 		ui.row(gtx, gap = 8, align = .End, key = 7)
 		{
 			w := max(gtx.constraints.max.x - 100, 160)
 			ui.sized(gtx, {min = {w, 0}, max = {w, ui.INF}})
-			field(gtx, "Date", "when it was last known true", &e.date, key = 8)
+			field(gtx, tr(m, .Date), tr(m, .Date_Ph), &e.date, key = 8)
 		}
 		st := ui.stack_open(gtx, key = 9)
-		if primer.button(gtx, "Today", .Default, .Medium, leading = .Calendar) {
+		if primer.button(gtx, tr(m, .Today), .Default, .Medium, leading = .Calendar) {
 			ui.text_set(&e.date, today())
 		}
-		primer.tooltip(gtx, "Date it today: it was checked and still holds.", ui.last_widget(gtx), delay = TOOLTIP_DELAY)
+		primer.tooltip(gtx, tr(m, .Today_Tip), ui.last_widget(gtx), delay = TOOLTIP_DELAY)
 		ui.close(&st)
 	}
 
@@ -453,7 +453,7 @@ editor :: proc(gtx: ^ui.Ctx, m: ^Model, list: ^shapes.Bullets_Result, current: ^
 	}
 	{
 		ui.column(gtx, gap = 4, align = .Fill, key = 11)
-		primer.text(gtx, "As it will be written", .Small, .Medium, color = s[.Fg_Color_Muted])
+		primer.text(gtx, tr(m, .As_Written), .Small, .Medium, color = s[.Fg_Color_Muted])
 		b := boxed(gtx, 12)
 		defer ui.close(&b)
 		primer.text(gtx, line, .Small, key = 12)
@@ -476,20 +476,20 @@ field :: proc(gtx: ^ui.Ctx, label, caption: string, s: ^ui.Text_State, key: u64)
 evidence :: proc(gtx: ^ui.Ctx, m: ^Model, query: string) {
 	res, st := ui.need(gtx, shapes.Recall{terms = query, limit = 5}, shapes.Recall_Result)
 	ui.column(gtx, gap = 8, align = .Fill, key = 13)
-	primer.heading(gtx, fmt.tprintf("What was said about \"%s\"", query), 3, .Small)
+	primer.heading(gtx, tf(m, .Said_About_Query, query), 3, .Small)
 	if !ready(st) {
 		loading(gtx, 2)
 		return
 	}
 	if res.error != "" || len(res.turns) == 0 {
-		primer.text(gtx, "Nothing in the transcripts; the fact is yours to write.", .Small, color = m.scheme[.Fg_Color_Muted])
+		primer.text(gtx, tr(m, .No_Evidence), .Small, color = m.scheme[.Fg_Color_Muted])
 		return
 	}
 	b := boxed(gtx)
 	defer ui.close(&b)
-	l := primer.action_list_open(gtx, .Full, dividers = true, name = "Evidence")
+	l := primer.action_list_open(gtx, .Full, dividers = true, name = tr(m, .Evidence))
 	for t in res.turns {
-		primer.action_list_item(&l, t.title, description = fmt.tprintf("%s · %s · %s", t.agent, t.date, t.snippet), description_variant = .Block, leading = .Comment_Discussion)
+		primer.action_list_item(&l, t.title, description = tf(m, .Join_Dot3, t.agent, t.date, t.snippet), description_variant = .Block, leading = .Comment_Discussion)
 	}
 	primer.action_list_close(&l)
 }
@@ -501,7 +501,7 @@ drop_confirm :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		return
 	}
 	handle := chosen(&e.loaded)
-	if primer.confirmation_dialog(gtx, &e.dropping, fmt.tprintf("Drop %s?", handle), "It leaves the vault and no find returns it again. It is kept in AI/DROPPED.md, so it is not lost.", confirm_content = "Drop", confirm_type = .Danger) == .Confirm {
+	if primer.confirmation_dialog(gtx, &e.dropping, tf(m, .Drop_Bullet_Ask, handle), tr(m, .Drop_Bullet_Body), confirm_content = tr(m, .Drop), confirm_type = .Danger) == .Confirm {
 		send(gtx, m, .Drop_Bullet, {handle}, place(e.frame.current))
 	}
 }
