@@ -1,6 +1,7 @@
 package brain
 
 import "core:encoding/json"
+import "core:fmt"
 import "core:strings"
 import "core:testing"
 
@@ -112,4 +113,94 @@ doctor_names_bullets_served_before_a_correction :: proc(t: ^testing.T) {
 		testing.expect_value(t, json_string(suspect[0], "handle"), "fixture tool")
 		testing.expect_value(t, json_string(suspect[0], "session"), "sess-one")
 	}
+}
+
+// Help's command lines are the subcommands a bullet may name. They are
+// read from `brain help`, not copied here, so help and COMMANDS cannot
+// drift apart. `help` itself has no line of its own.
+@(test)
+help_subcommands_are_the_commands_verify_accepts :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	o, _, code := exec(f.cli, "help", "--color=never")
+	testing.expect_value(t, code, 0)
+	listed := help_subcommands(o)
+	testing.expect(t, len(listed) > 0, "help lists commands")
+	for sub in listed {
+		testing.expectf(t, command_known(sub), "help lists %q, COMMANDS does not", sub)
+	}
+	for sub in COMMANDS {
+		if sub == "help" {
+			continue
+		}
+		testing.expectf(t, help_lists(listed, sub), "COMMANDS has %q, help does not list it", sub)
+	}
+}
+
+// A command help lists is not a failed claim. A path that is not on this
+// machine still is: the check is not pointed at some other directory.
+@(test)
+verify_passes_commands_help_lists_and_fails_a_missing_path :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	help, _, code := exec(f.cli, "help", "--color=never")
+	testing.expect_value(t, code, 0)
+	b := strings.builder_make()
+	strings.write_string(&b, "- **live commands** —")
+	for sub in help_subcommands(help) {
+		fmt.sbprintf(&b, " `brain %s`", sub)
+	}
+	strings.write_string(&b, " `brain help` are commands — fixture — 2026-01-01\n")
+	strings.write_string(&b, "- **old checkout** — the checkout was ~/Source/brainfold — fixture — 2026-01-01\n")
+	strings.write_string(&b, "- **bad command** — run `brain reindexx` — fixture — 2026-01-01\n")
+	mem := path.join(f.vault, "AI", "MEMORY.md")
+	testing.expect_value(t, path.append_file(mem, strings.to_string(b)), nil)
+	o, _, vcode := exec(f.cli, "verify", "live commands", "old checkout", "bad command")
+	testing.expect_value(t, vcode, 1)
+	testing.expect_value(t, strings.count(o, "not on this machine"), 1)
+	testing.expect_value(t, strings.count(o, "no such subcommand"), 1)
+	testing.expect(t, strings.contains(o, "**old checkout** path ~/Source/brainfold: not on this machine"), o)
+	testing.expect(t, strings.contains(o, "brain reindexx: no such subcommand"), o)
+}
+
+// help_subcommands is every subcommand `brain help` prints on its own line.
+help_subcommands :: proc(text: string) -> []string {
+	found := make([dynamic]string)
+	seen := make(map[string]bool)
+	rest := text
+	for line in strings.split_lines_iterator(&rest) {
+		if !strings.has_prefix(line, "  brain ") {
+			continue
+		}
+		name := line[len("  brain "):]
+		if i := strings.index_byte(name, ' '); i >= 0 {
+			name = name[:i]
+		}
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		append(&found, name)
+	}
+	return found[:]
+}
+
+command_known :: proc(name: string) -> bool {
+	for c in COMMANDS {
+		if c == name {
+			return true
+		}
+	}
+	return false
+}
+
+help_lists :: proc(listed: []string, name: string) -> bool {
+	for s in listed {
+		if s == name {
+			return true
+		}
+	}
+	return false
 }

@@ -1,7 +1,11 @@
 package brain
 
+import "core:encoding/json"
+import "core:fmt"
 import "core:strings"
 import "core:testing"
+
+import "jm:path"
 
 @(test)
 doctor_runs_and_promotes_by_query_frequency :: proc(t: ^testing.T) {
@@ -40,4 +44,51 @@ doctor_lists_older_notes_a_bullet_names :: proc(t: ^testing.T) {
 	testing.expect(t, !strings.contains(o[i:], "**sqlite**"), "a bullet no older note names is not listed")
 	o, _, _ = exec(f.cli, "doctor", "--json")
 	testing.expect(t, strings.contains(o, `"older_notes":[{"file":"AI/handoffs/2025-12-30-old-plan.md","date":"2025-12-30","lines":2,"first_line":3,"handles":["awk empty first file"]},{"file":"AI/handoffs/2026-01-01-fixture.md","date":"2026-01-01","lines":1,"first_line":8,"handles":["libgit2"]}]`), o)
+}
+
+// Doctor names the longest facts over the cap, not every one. A flat
+// list of them all is longer than a person will work through.
+@(test)
+doctor_lists_the_longest_oversized_bullets :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	n := OVERSIZE_SHOW + 8
+	b := strings.builder_make()
+	for i in 0 ..< n {
+		fact := strings.repeat("y", MAXLEN + 1 + i)
+		fmt.sbprintf(&b, "- **long %02d** — %s — fixture — 2026-01-01\n", i, fact)
+	}
+	mem := path.join(f.vault, "AI", "MEMORY.md")
+	testing.expect_value(t, path.append_file(mem, strings.to_string(b)), nil)
+	o, _, code := exec(f.cli, "doctor", "--json")
+	testing.expect_value(t, code, 0)
+	v, jerr := json.parse_string(o)
+	testing.expect_value(t, jerr, nil)
+	rows, _ := v.(json.Object)["oversized"].(json.Array)
+	testing.expect_value(t, len(rows), OVERSIZE_SHOW)
+	testing.expect(t, len(rows) < n, "not every oversized bullet")
+	if len(rows) == 0 {
+		return
+	}
+	testing.expect_value(t, json_string(rows[0], "handle"), fmt.tprintf("long %02d", n - 1))
+	short := fmt.tprintf("long %02d", 0)
+	prev := 0
+	for row, i in rows {
+		testing.expect(t, json_string(row, "handle") != short, "the shortest oversized bullet is cut")
+		nlen := int(json_number(row, "len"))
+		testing.expect(t, nlen > MAXLEN, "still over the cap")
+		if i > 0 {
+			testing.expect(t, nlen <= prev, "longest first")
+		}
+		prev = nlen
+	}
+	text, _, _ := exec(f.cli, "doctor")
+	at := strings.index(text, "== oversized bullets")
+	testing.expect(t, at >= 0, text)
+	rest := text[at:]
+	j := strings.index(rest[1:], "\n== ")
+	section := j >= 0 ? rest[:j + 1] : rest
+	testing.expect(t, strings.contains(section, fmt.tprintf("long %02d", n - 1)), section)
+	testing.expect(t, !strings.contains(section, short), section)
 }

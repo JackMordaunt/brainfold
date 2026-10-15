@@ -8,6 +8,11 @@ import "jm:sqlite3"
 
 CSV_CORE :: "('AI/MEMORY.md','AI/LEARNINGS.md','AI/TUNINGS.md')"
 
+// The longest facts doctor lists, not every one over MAXLEN. A flat list
+// of them all is longer than a person will work through; the next run
+// shows the next longest.
+OVERSIZE_SHOW :: 20
+
 // Section is one of doctor's checks: a key for --json, a title for a person,
 // and the query that lists what it found.
 Section :: struct {
@@ -25,7 +30,7 @@ doctor_sections :: proc(nq: int) -> []Section {
 		 where file in ` + CSV_CORE + ` and
 		   (aliases='' or (length(aliases)-length(replace(aliases,',',''))) < 1)
 		 order by file, handle`})
-	append(&s, Section{key = "oversized", title = fmt.aprintf("oversized bullets (fact > %d chars)", MAXLEN), sql = "select file, handle, len from bullets where len > ? order by len desc", arg = i64(MAXLEN), has_arg = true})
+	append(&s, Section{key = "oversized", title = fmt.aprintf("oversized bullets (fact > %d chars)", MAXLEN), sql = fmt.aprintf("select file, handle, len from bullets where len > ? order by len desc limit %d", OVERSIZE_SHOW), arg = i64(MAXLEN), has_arg = true})
 	append(&s, Section{key = "duplicate_handles", title = "duplicate handles", sql = `select handle, count(*) n, group_concat(file,' + ') files
 		 from bullets group by lower(handle) having n > 1`})
 	append(&s, Section{key = "dead_links", title = "dead wikilinks", sql = `select l.file, l.line, l.target from links l

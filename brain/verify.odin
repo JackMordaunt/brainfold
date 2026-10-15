@@ -15,11 +15,13 @@ import "jm:sqlite3"
 // doctor, and names the failures. --apply rewrites the date on every
 // bullet whose claims all passed, so the date means checked, not old.
 
-// The subcommands a bullet may name, so `brain foo` is a claim.
+// The subcommands a bullet may name, so `brain foo` is a claim. The same
+// list `brain help` prints, plus `help` itself, which has no line there.
 COMMANDS :: [?]string {
-	"locate", "find", "pack", "prime", "recall", "howto", "day", "week", "propose", "lessons", "settle",
-	"inbox", "review", "import", "export", "mcp", "doctor", "verify", "learn", "log", "ledger", "lint",
-	"secrets", "reindex", "sync", "install", "uninstall", "hooks", "update", "version", "help",
+	"find", "pack", "prime", "recall", "howto", "day", "week", "propose", "settle", "lessons", "inbox",
+	"review", "import", "export", "mcp", "sync", "tend", "doctor", "learn", "alias", "bullet", "unlink",
+	"spend", "verify", "log", "ledger", "lint", "secrets", "reindex", "install", "setup", "uninstall",
+	"locate", "hooks", "update", "version", "help",
 }
 
 GIT_SHA_MIN :: 7 // hex characters before a word is a commit
