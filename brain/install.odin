@@ -5,7 +5,10 @@ import "core:os"
 import "core:strings"
 
 import git "jm:git"
+import "jm:i18n"
 import "jm:path"
+
+import "../msg"
 
 // Everything install writes to a file the user owns goes inside a tagged
 // block, so it can be replaced on re-install and removed by `brain uninstall`
@@ -41,6 +44,16 @@ note :: proc(cli: ^Cli, format: string, args: ..any) {
 	out(cli, "  ")
 	outf(cli, format, ..args)
 	out(cli, "\n")
+}
+
+// told is a dry-run line of the install report, in the language in use.
+told :: proc(cli: ^Cli, key: msg.Msg, args: ..i18n.Arg) {
+	say(cli, "%s", phrase(cli, key, ..args))
+}
+
+// aside is a note of the install report, in the language in use.
+aside :: proc(cli: ^Cli, key: msg.Msg, args: ..i18n.Arg) {
+	note(cli, "%s", phrase(cli, key, ..args))
 }
 
 block_begin :: proc(co, tag, cc: string, by := "brain install") -> string {
@@ -87,10 +100,10 @@ block_apply :: proc(cli: ^Cli, file, tag, co, cc, body: string, by := "brain ins
 			}
 		}
 		if strings.join(cur[:], "\n") == want {
-			say(cli, "%s: already current", file)
+			told(cli, .Install_Current, file)
 			return "current"
 		}
-		say(cli, "%s: block refreshed", file)
+		told(cli, .Install_Refreshed, file)
 		if cli.dry {
 			return "refreshed"
 		}
@@ -98,7 +111,7 @@ block_apply :: proc(cli: ^Cli, file, tag, co, cc, body: string, by := "brain ins
 		path.write(file, replace_block(text, open_mark, close_mark, want))
 		return "refreshed"
 	}
-	say(cli, "%s: block added", file)
+	told(cli, .Install_Added, file)
 	if cli.dry {
 		return "added"
 	}
@@ -140,7 +153,7 @@ block_remove :: proc(cli: ^Cli, file, tag: string) {
 	if !exists || !strings.contains(text, open_mark) {
 		return
 	}
-	say(cli, "%s: block removed", file)
+	told(cli, .Install_Removed, file)
 	if cli.dry {
 		return
 	}
@@ -153,7 +166,7 @@ rc_block :: proc(cli: ^Cli, rc, body, tag: string) {
 	GUARD :: "[[ $- != *i* ]] && return"
 	text, exists := read_text(rc)
 	if exists && strings.contains(text, GUARD) && !strings.contains(text, strings.concatenate({"brain:", tag, " >>>"})) {
-		say(cli, "%s: block added above the interactive guard", rc)
+		told(cli, .Install_Added_Above, rc)
 		if cli.dry {
 			return
 		}
@@ -263,7 +276,7 @@ install_vault :: proc(cli: ^Cli, given: string, fresh := false) -> (vault: strin
 	}
 	if named != "" {
 		if !os.is_dir(named) && !(fresh && cli.dry) {
-			return "", false, fmt.aprintf("install: no such directory: %s", named)
+			return "", false, phrase(cli, .Install_No_Dir, named)
 		}
 		abs, aerr := path.abs(named)
 		return aerr == nil ? abs : clean(named), fresh, ""
@@ -273,7 +286,7 @@ install_vault :: proc(cli: ^Cli, given: string, fresh := false) -> (vault: strin
 	}
 	v := canonical_vault(cli)
 	if os.exists(v) && !os.is_dir(v) {
-		return "", false, fmt.aprintf("install: %s exists and is not a directory", v)
+		return "", false, phrase(cli, .Install_Not_Dir, v)
 	}
 	return v, !os.exists(v), ""
 }
@@ -284,14 +297,14 @@ create_vault :: proc(cli: ^Cli, vault: string) -> string {
 	for f in STARTER {
 		file := path.join(vault, f.name)
 		if err := path.mkdirs(path.dir(file)); err != nil {
-			return fmt.aprintf("install: cannot create %s: %v", vault, err)
+			return phrase(cli, .Install_Cannot_Create, vault, fmt.tprintf("%v", err))
 		}
 		if err := path.write(file, f.body); err != nil {
-			return fmt.aprintf("install: cannot write %s: %v", file, err)
+			return phrase(cli, .Install_Cannot_Write, file, fmt.tprintf("%v", err))
 		}
 	}
 	if repo, err := git.init(vault); err != nil {
-		note(cli, "the vault could not be versioned in %s: %s", vault, fault_text(err))
+		aside(cli, .Install_Unversioned, vault, fault_text(err))
 	} else {
 		git.close(&repo)
 	}
@@ -336,26 +349,26 @@ cmd_install :: proc(cli: ^Cli, args: []string) -> int {
 	hooks := path.join(cli.conf_dir, "hooks")
 	bindir := pick_bindir(cli)
 
-	outf(cli, "tool:  %s\n", cli.tool)
-	outf(cli, "vault: %s   (%s)\n", vault, kind)
+	outf(cli, "%s\n", phrase(cli, .Install_Tool, cli.tool))
+	outf(cli, "%s\n", phrase(cli, .Install_Vault_Line, vault, kind))
 	if created {
 		if !cli.dry {
 			if err := create_vault(cli, vault); err != "" {
 				return fail(cli, err)
 			}
 		}
-		say(cli, "created a new vault; 'brain install <path>' binds another one")
+		told(cli, .Install_Created)
 	} else if !os.is_dir(path.join(vault, "AI")) {
-		note(cli, "warning: %s has no AI/ — is that the vault?", vault)
+		aside(cli, .Install_No_Ai, vault)
 	}
 	if !cli.dry {
 		path.mkdirs(cli.state)
 		record(cli, cli.conf_vault, vault)
 		record(cli, path.join(cli.conf_dir, "tool"), cli.tool)
 	}
-	say(cli, "vault path recorded: %s", cli.conf_vault)
+	told(cli, .Install_Recorded, cli.conf_vault)
 
-	out(cli, "cli:\n")
+	outf(cli, "%s\n", phrase(cli, .Install_Head_Cli))
 	installed := install_binary(cli, bindir)
 	// The hooks are compiled into the binary and written out here, with the
 	// binary's own path inside each: git runs hooks with whatever PATH it
@@ -363,23 +376,23 @@ cmd_install :: proc(cli: ^Cli, args: []string) -> int {
 	if !cli.dry {
 		hook_files := HOOKS
 		if err := write_executables(hooks, hook_files[:], posix_path(installed)); err != nil {
-			note(cli, "cannot write %s: %v", hooks, err)
+			aside(cli, .Cannot_Write, hooks, fmt.tprintf("%v", err))
 		}
 	}
-	say(cli, "hooks written under %s", hooks)
+	told(cli, .Install_Hooks_Under, hooks)
 	if on_path(cli, bindir) {
-		note(cli, "%s is already on PATH", bindir)
+		aside(cli, .Install_On_Path, bindir)
 	} else {
 		for rc in path_rc_files(cli) {
 			rc_block(cli, rc, fmt.aprintf("export PATH=\"%s:$PATH\"", posix_path(bindir)), "path")
 		}
-		note(cli, "open a new shell, or: export PATH=\"%s:$PATH\"", posix_path(bindir))
+		aside(cli, .Install_New_Shell, posix_path(bindir))
 		if kind == "windows" {
-			note(cli, "for PowerShell and cmd, add %s to the user PATH", bindir)
+			aside(cli, .Install_Windows_Path, bindir)
 		}
 	}
 
-	out(cli, "git hooks:\n")
+	outf(cli, "%s\n", phrase(cli, .Install_Head_Git))
 	// The hooks live outside the vault, so this path has to be absolute.
 	if !cli.dry {
 		if repo, err := git.open(vault); err == nil {
@@ -387,28 +400,28 @@ cmd_install :: proc(cli: ^Cli, args: []string) -> int {
 			git.close(&repo)
 		}
 	}
-	say(cli, "core.hooksPath = %s", hooks)
+	told(cli, .Install_Hooks_Path, hooks)
 
 	// Earlier versions installed PATH shims that refused commands the vault
 	// recorded as traps. The guarded commands were vault knowledge hard-coded
 	// into the tool, so the shims went; what they left behind is removed.
 	remove_guards(cli)
 
-	out(cli, "agent bindings:\n")
+	outf(cli, "%s\n", phrase(cli, .Install_Head_Agents))
 	// ~/.agents/AGENTS.md is the canonical binding: pi and Codex already
 	// symlink to it, so pointing it at this vault is all a new machine needs.
 	agents := path.join(cli.home, ".agents", "AGENTS.md")
 	target := path.join(vault, "AI", "AGENTS.md")
 	if cli.dry {
-		say(cli, "agents link: %s -> %s", agents, target)
+		told(cli, .Install_Agents_Link, agents, target)
 	} else {
 		path.mkdirs(path.dir(agents))
 		if link_or_copy(agents, target) {
-			say(cli, "agents link: %s -> %s", agents, target)
+			told(cli, .Install_Agents_Link, agents, target)
 		} else if os.copy_file(agents, target) == nil {
-			say(cli, "copied %s (no symlink support; re-run install after editing AGENTS.md)", agents)
+			told(cli, .Install_Copied_Agents, agents)
 		} else {
-			say(cli, "could not link %s (copy it by hand)", agents)
+			told(cli, .Install_Could_Not_Link, agents)
 		}
 	}
 	// Tilde imports are supported, so this block is identical on every machine.
@@ -433,7 +446,7 @@ cmd_install :: proc(cli: ^Cli, args: []string) -> int {
 			append(&kept, l)
 		}
 		if dropped {
-			say(cli, "%s: dropping the now-duplicate absolute import", claude_md)
+			told(cli, .Install_Drop_Import, claude_md)
 			if !cli.dry {
 				path.write(claude_md, strings.join(kept[:], "\n"))
 			}
@@ -443,24 +456,24 @@ cmd_install :: proc(cli: ^Cli, args: []string) -> int {
 	for a in ([2]string{path.join(cli.home, ".pi", "agent", "AGENTS.md"), path.join(cli.home, ".codex", "AGENTS.md")}) {
 		if os.exists(a) {
 			if _, ok := read_text(a); ok {
-				note(cli, "%s resolves (pointer-only by design; left alone)", a)
+				aside(cli, .Install_Resolves, a)
 			} else {
-				note(cli, "%s exists but is not readable", a)
+				aside(cli, .Install_Unreadable, a)
 			}
 		} else {
-			note(cli, "%s absent — link it to %s if that agent is used here", a, agents)
+			aside(cli, .Install_Absent, a, agents)
 		}
 	}
 
-	out(cli, "scanner:\n")
+	outf(cli, "%s\n", phrase(cli, .Install_Head_Scanner))
 	if gl, found := find_gitleaks(cli); found {
-		note(cli, "gitleaks: %s", gl)
+		aside(cli, .Install_Gitleaks, gl)
 	} else {
-		note(cli, "gitleaks missing — pacman -S gitleaks / brew install gitleaks / scoop install gitleaks")
+		aside(cli, .Install_Gitleaks_Missing)
 	}
 
 	if cli.dry {
-		out(cli, "\n(dry run: nothing was written)\n")
+		outf(cli, "\n%s\n", phrase(cli, .Install_Dry))
 		return 0
 	}
 	return cmd_reindex(cli, nil)
@@ -487,33 +500,33 @@ install_binary :: proc(cli: ^Cli, bindir: string) -> (dest: string) {
 	if exe == "" {
 		found, err := os.get_executable_path(context.allocator)
 		if err != nil {
-			note(cli, "cannot find this executable: %v", err)
+			aside(cli, .Install_No_Exe, fmt.tprintf("%v", err))
 			return
 		}
 		exe = found
 	}
 	if cli.dry {
-		say(cli, "cli: %s -> %s", dest, exe)
+		told(cli, .Install_Cli_Arrow, dest, exe)
 		return
 	}
 	when ODIN_OS == .Windows {
 		for stale in ([2]string{path.join(bindir, "brain"), path.join(bindir, "brain.cmd")}) {
 			if os.is_file(stale) && os.remove(stale) == nil {
-				say(cli, "removed the shell wrapper %s", stale)
+				told(cli, .Install_Removed_Wrapper, stale)
 			}
 		}
 	}
 	if path.same(dest, exe) {
-		say(cli, "cli: %s is this executable", dest)
+		told(cli, .Install_Cli_Same, dest)
 		return
 	}
 	if link_or_copy(dest, exe) {
-		say(cli, "cli link: %s -> %s", dest, exe)
+		told(cli, .Install_Cli_Linked, dest, exe)
 	} else if os.copy_file(dest, exe) == nil {
 		os.change_mode(dest, os.Permissions_All - os.Permissions_Write_All + {.Write_User})
-		say(cli, "copied %s (re-run install after a rebuild)", dest)
+		told(cli, .Install_Copied_Cli, dest)
 	} else {
-		say(cli, "could not install %s (copy it by hand)", dest)
+		told(cli, .Install_Could_Not_Install, dest)
 	}
 	return
 }
@@ -545,7 +558,7 @@ remove_guards :: proc(cli: ^Cli) {
 	}
 	bashrc := path.join(cli.home, ".bashrc")
 	if text, ok := read_text(bashrc); ok && strings.contains(text, "brain-guards.sh") {
-		say(cli, "%s: removing the superseded shell-function guard", bashrc)
+		told(cli, .Install_Remove_Guard, bashrc)
 		if !cli.dry {
 			kept := make([dynamic]string)
 			for l in strings.split_lines(text) {
@@ -559,14 +572,14 @@ remove_guards :: proc(cli: ^Cli) {
 	}
 	envd := path.join(cli.home, ".config", "environment.d", "10-brain-shims.conf")
 	if os.exists(envd) {
-		say(cli, "remove %s", envd)
+		told(cli, .Install_Remove, envd)
 		if !cli.dry {
 			os.remove(envd)
 		}
 	}
 	shims := path.join(cli.conf_dir, "shims")
 	if os.is_dir(shims) {
-		say(cli, "remove %s", shims)
+		told(cli, .Install_Remove, shims)
 		if !cli.dry {
 			os.remove_all(shims)
 		}
@@ -575,7 +588,7 @@ remove_guards :: proc(cli: ^Cli) {
 
 cmd_uninstall :: proc(cli: ^Cli, args: []string) -> int {
 	cli.dry = len(args) > 0 && args[0] == "--dry-run"
-	out(cli, "removing this machine's bindings; the vault itself is untouched\n")
+	outf(cli, "%s\n", phrase(cli, .Install_Uninstall))
 	for rc in path_rc_files(cli) {
 		block_remove(cli, rc, "path")
 	}
@@ -593,21 +606,21 @@ cmd_uninstall :: proc(cli: ^Cli, args: []string) -> int {
 		if !os.exists(f) && !is_link(f) {
 			continue
 		}
-		say(cli, "remove %s", f)
+		told(cli, .Install_Remove, f)
 		if !cli.dry {
 			os.remove(f)
 		}
 	}
 	hooks := path.join(cli.conf_dir, "hooks")
 	if os.is_dir(hooks) {
-		say(cli, "remove %s", hooks)
+		told(cli, .Install_Remove, hooks)
 		if !cli.dry {
 			os.remove_all(hooks)
 		}
 	}
-	note(cli, "left alone: ~/.agents/AGENTS.md, the index in %s, and the vault", cli.state)
+	aside(cli, .Install_Left, cli.state)
 	if cli.dry {
-		out(cli, "(dry run: nothing was written)\n")
+		outf(cli, "%s\n", phrase(cli, .Install_Dry))
 	}
 	return 0
 }

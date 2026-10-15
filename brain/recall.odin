@@ -197,8 +197,8 @@ recall_enabled :: proc(cli: ^Cli) -> bool {
 		return true
 	}
 	errf(cli, "%s\n\n", phrase(cli, .Recall_No_Sources))
-	errf(cli, "  available: %s \n", strings.join(adapters_all(cli), " "))
-	errf(cli, "  enable one: brain recall --enable claude\n")
+	errf(cli, "  %s \n", phrase(cli, .Recall_Available, strings.join(adapters_all(cli), " ")))
+	errf(cli, "  %s\n", phrase(cli, .Recall_Enable_One))
 	return false
 }
 
@@ -225,9 +225,9 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 				return fail(cli, err)
 			}
 			defer sqlite3.close(&db)
-			outf(cli, "ingested %d transcript(s)\n", recall_sync(cli, db, full = true))
-			outf(cli, "turns: %d\n", scalar_int(db, "select count(*) from turn"))
-			outf(cli, "tool calls: %d\n", scalar_int(db, "select count(*) from tool"))
+			said(cli, .Recall_Ingested, recall_sync(cli, db, full = true))
+			said(cli, .Recall_Turns, scalar_int(db, "select count(*) from turn"))
+			said(cli, .Recall_Tools, scalar_int(db, "select count(*) from tool"))
 			return 0
 		case "--sources":
 			on := adapters_on(cli)
@@ -238,7 +238,7 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 						enabled = true
 					}
 				}
-				outf(cli, "  %-8s %s\n", a, enabled ? "enabled" : "disabled")
+				outf(cli, "  %-8s %s\n", a, phrase(cli, enabled ? .Word_Enabled : .Word_Disabled))
 			}
 			return 0
 		case "--enable":
@@ -283,7 +283,7 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 			return 0
 		case "--full":
 			if len(rest) == 0 {
-				return fail(cli, "recall --full <turn-id>")
+				return fail(cli, phrase(cli, .Recall_Full))
 			}
 			db, err := open_recall_db(cli)
 			if err != "" {
@@ -303,7 +303,7 @@ cmd_recall :: proc(cli: ^Cli, args: []string) -> int {
 			return 0
 		case "--around":
 			if len(rest) == 0 {
-				return fail(cli, "recall --around <turn-id>")
+				return fail(cli, phrase(cli, .Recall_Around))
 			}
 			return recall_around(cli, rest[0], json_out)
 		case "--limit":

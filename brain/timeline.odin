@@ -73,7 +73,7 @@ cmd_timeline :: proc(cli: ^Cli, args: []string, week: bool) -> int {
 				rest = rest[1:]
 			}
 			if !ok || n <= 0 {
-				return fail(cli, "usage: brain week --since <days>d")
+				return fail(cli, phrase(cli, .Usage_Week_Since))
 			}
 			days = n
 		case "--project":

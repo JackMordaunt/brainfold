@@ -53,7 +53,7 @@ review_name :: proc(r: Review) -> string {
 // cmd_review shows or sets when proposals are reviewed, and reindexes so
 // the setting takes effect on the next find.
 cmd_review :: proc(cli: ^Cli, args: []string) -> int {
-	usage := "usage: brain review [after|before]"
+	usage := phrase(cli, .Usage_Review)
 	if len(args) > 1 {
 		return fail(cli, usage)
 	}
@@ -62,11 +62,11 @@ cmd_review :: proc(cli: ^Cli, args: []string) -> int {
 			return fail(cli, usage)
 		}
 		if err := path.mkdirs(cli.conf_dir); err != nil {
-			return fail(cli, fmt.aprintf("cannot create %s: %v", cli.conf_dir, err))
+			return fail(cli, phrase(cli, .Cannot_Create, cli.conf_dir, fmt.tprintf("%v", err)))
 		}
 		conf := path.join(cli.conf_dir, "review")
 		if err := path.write(conf, strings.concatenate({args[0], "\n"})); err != nil {
-			return fail(cli, fmt.aprintf("cannot write %s: %v", conf, err))
+			return fail(cli, phrase(cli, .Cannot_Write, conf, fmt.tprintf("%v", err)))
 		}
 		if cli.vault != "" {
 			if err := sync(cli, quiet = true); err != "" {
@@ -285,7 +285,7 @@ inbox_write :: proc(cli: ^Cli, line: string, b: Bullet) -> (code: int, proposed:
 		text = strings.concatenate({text, "\n"})
 	}
 	if werr := path.write(inbox, strings.concatenate({text, line, "\n"})); werr != nil {
-		return fail(cli, fmt.aprintf("cannot write %s: %v", inbox, werr)), false
+		return fail(cli, phrase(cli, .Cannot_Write, inbox, fmt.tprintf("%v", werr))), false
 	}
 	n += 1
 	if cli.json {
@@ -358,7 +358,7 @@ write_inbox :: proc(cli: ^Cli, lines: []Inbox_Line) -> string {
 	}
 	inbox := path.join(cli.vault, INBOX_FILE)
 	if werr := path.write(inbox, strings.to_string(b)); werr != nil {
-		return fmt.aprintf("cannot write %s: %v", inbox, werr)
+		return phrase(cli, .Cannot_Write, inbox, fmt.tprintf("%v", werr))
 	}
 	return ""
 }
@@ -407,7 +407,7 @@ cmd_inbox :: proc(cli: ^Cli, args: []string) -> int {
 	if !exists {
 		return fail(cli, phrase(cli, .Inbox_Empty))
 	}
-	usage := "usage: brain inbox [approve <n>|all [--to MEMORY|LEARNINGS|TUNINGS] | drop <n> | review <n> | merge <n> --into <handle> [--at FILE:LINE] '<bullet>']"
+	usage := phrase(cli, .Usage_Inbox)
 	if len(args) < 2 {
 		return fail(cli, usage)
 	}
@@ -496,7 +496,7 @@ cmd_inbox :: proc(cli: ^Cli, args: []string) -> int {
 			text = strings.concatenate({text, "\n"})
 		}
 		if werr := path.write(dropped, strings.concatenate({text, chosen.text, "\n"})); werr != nil {
-			return fail(cli, fmt.aprintf("cannot write %s: %v", dropped, werr))
+			return fail(cli, phrase(cli, .Cannot_Write, dropped, fmt.tprintf("%v", werr)))
 		}
 		if err := write_inbox(cli, drop_at(lines, at)); err != "" {
 			return fail(cli, err)
@@ -542,7 +542,7 @@ append_bullets :: proc(cli: ^Cli, rel: string, chosen: []Inbox_Line) -> string {
 		strings.write_string(&b, "\n")
 	}
 	if werr := path.write(target, strings.to_string(b)); werr != nil {
-		return fmt.aprintf("cannot write %s: %v", target, werr)
+		return phrase(cli, .Cannot_Write, target, fmt.tprintf("%v", werr))
 	}
 	return ""
 }

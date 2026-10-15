@@ -504,7 +504,7 @@ sync_status :: proc(cli: ^Cli) -> int {
 		jw_flush(cli, &w)
 		return 0
 	}
-	said(cli, .Sync_State, on ? "on" : "off")
+	said(cli, .Sync_State, phrase(cli, on ? .Word_On : .Word_Off))
 	if remote == "" {
 		said(cli, .Not_Connected_Short)
 	} else {

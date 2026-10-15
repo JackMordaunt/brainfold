@@ -112,12 +112,22 @@ bullet_show :: proc(cli: ^Cli, handle, place: string) -> int {
 show_text :: proc(cli: ^Cli, db: sqlite3.Db, file: string, at: int, handle: string, history: []Change, proposed: Origin) -> int {
 	FROM :: " from query_hits h join queries q on q.id = h.query_id where h.handle=? and h.file=?"
 	outf(cli, "%s:%d **%s**\n", file, at, handle)
-	outf(cli, "served %d times in %d sessions, last %s\n", scalar_int(db, "select count(*)" + FROM, handle, file), scalar_int(db, "select count(distinct nullif(q.session,''))" + FROM, handle, file), scalar_text(db, "select coalesce(max(q.ts),'never')" + FROM, handle, file))
+	last := scalar_text(db, "select coalesce(max(q.ts),'never')" + FROM, handle, file)
+	if last == "never" {
+		last = phrase(cli, .Word_Never)
+	}
+	said(
+		cli,
+		.Show_Served,
+		scalar_int(db, "select count(*)" + FROM, handle, file),
+		scalar_int(db, "select count(distinct nullif(q.session,''))" + FROM, handle, file),
+		last,
+	)
 	for c in history {
 		outf(cli, "%s %s %s (%s)\n", c.date, c.commit, c.subject, strings.join(c.files, ", "))
 	}
 	if proposed.session != "" {
-		outf(cli, "proposed %s by %s in \"%s\" (turn %s)\n", proposed.ts, proposed.agent, proposed.title, proposed.turn)
+		said(cli, .Show_Proposed, proposed.ts, proposed.agent, proposed.title, proposed.turn)
 	}
 	return 0
 }

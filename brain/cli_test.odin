@@ -934,6 +934,42 @@ help_is_styled_only_for_a_person :: proc(t: ^testing.T) {
 	testing.expect_value(t, o, USAGE)
 }
 
+// A saved language changes the styled help a person reads. An agent, a
+// pipe, and --color=never still get the English USAGE constant.
+@(test)
+plain_help_stays_english_when_a_language_is_saved :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	dir, err := path.temp_dir("brain-locale-")
+	testing.expect_value(t, err, nil)
+	defer {
+		os.remove_all(dir)
+		delete(dir)
+	}
+	testing.expect_value(t, path.mkdirs(path.join(dir, "brain")), nil)
+	testing.expect_value(t, path.write(path.join(dir, "brain", "locale"), "de\n"), nil)
+	env := make(map[string]string)
+	env["TERM"] = "xterm-256color"
+	env["LC_ALL"] = ""
+	env["LC_MESSAGES"] = ""
+	env["LANG"] = "fr_FR.UTF-8"
+	env["XDG_CONFIG_HOME"] = dir
+	for k in ([?]string{"NO_COLOR", "CLICOLOR_FORCE", "BRAIN_COLOR", "AI_AGENT", "CLAUDECODE", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED"}) {
+		env[k] = ""
+	}
+	person := new_cli(env, tty = true)
+	o, _, _ := exec(person, "help")
+	testing.expect(t, strings.contains(o, "\x1b[1mFragen\x1b[0m"), "a person sees the German heading")
+	testing.expect(t, !strings.contains(o, "\x1b[1mAsk\x1b[0m"), "the English heading is not used")
+	o, _, _ = exec(person, "help", "--color=never")
+	testing.expect_value(t, o, USAGE)
+	env["AI_AGENT"] = "fixture-agent"
+	o, _, _ = exec(new_cli(env, tty = true), "help")
+	testing.expect_value(t, o, USAGE)
+	env["AI_AGENT"] = ""
+	o, _, _ = exec(new_cli(env), "help")
+	testing.expect_value(t, o, USAGE)
+}
+
 // Commands that find the index stale at once each rebuild it; none may
 // fail for another's build. A shared temp name let one remove the file
 // another was writing ("attempt to write a readonly database"), as

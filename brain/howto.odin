@@ -239,7 +239,7 @@ howto_propose :: proc(cli: ^Cli, terms: []string, h: Howto) -> int {
 		return fail(cli, err)
 	}
 	if len(h.commands) == 0 {
-		return fail(cli, "the matching session ran no successful command to keep")
+		return fail(cli, phrase(cli, .Howto_None_Kept))
 	}
 	repo := path.base(h.cwd)
 	if repo == "" || repo == "/" || repo == "." {
@@ -258,7 +258,7 @@ howto_propose :: proc(cli: ^Cli, terms: []string, h: Howto) -> int {
 	strings.write_string(&b, "```\n")
 	path.mkdirs(path.dir(file))
 	if werr := path.write(file, strings.to_string(b)); werr != nil {
-		return fail(cli, strings.concatenate({"cannot write ", file}))
+		return fail(cli, phrase(cli, .Howto_Cannot_Write, file))
 	}
 	line := strings.concatenate(
 		{
@@ -269,7 +269,7 @@ howto_propose :: proc(cli: ^Cli, terms: []string, h: Howto) -> int {
 		},
 	)
 	if !cli.json {
-		outf(cli, "wrote %s\n", rel)
+		said(cli, .Howto_Wrote, rel)
 	}
 	code, _ := propose_line(cli, line)
 	return code

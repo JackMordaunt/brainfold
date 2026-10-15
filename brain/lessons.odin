@@ -67,7 +67,7 @@ cmd_lessons :: proc(cli: ^Cli, args: []string) -> int {
 			days = n
 		case "--project", "--session":
 			if len(rest) == 0 {
-				return fail(cli, strings.concatenate({"usage: brain lessons ", arg, " <name>"}))
+				return fail(cli, phrase(cli, .Usage_Lessons_Arg, arg))
 			}
 			if arg == "--project" {
 				project = rest[0]

@@ -86,16 +86,18 @@ cmd_setup :: proc(cli: ^Cli, args: []string) -> int {
 			said(cli, .Setup_Vault, vault, bullets)
 		}
 		for a in agents {
-			state := "not on this machine"
+			state := phrase(cli, .Not_On_Machine)
 			if a.installed {
-				state =
-					a.hooks && a.reading ? "connected" : a.hooks ? "hooks on; transcripts not read" : "not connected"
+				state = phrase(
+					cli,
+					a.hooks && a.reading ? .Agent_Connected : a.hooks ? .Agent_Hooks : .Agent_Quiet,
+				)
 			}
 			outf(cli, "%-7s %s\n", a.name, state)
 		}
 		said(cli, .Setup_Lookups, lookups)
 		said(cli, .Setup_Import, fresh, sources)
-		said(cli, .Setup_Sync, syncs ? "on" : "off")
+		said(cli, .Setup_Sync, phrase(cli, syncs ? .Word_On : .Word_Off))
 		return 0
 	}
 	w := jw_make()

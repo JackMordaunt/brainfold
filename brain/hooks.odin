@@ -227,7 +227,7 @@ cmd_hooks :: proc(cli: ^Cli, args: []string) -> int {
 			only = rest[0]
 			rest = rest[1:]
 			if _, known := harness_named(only); !known {
-				return fail(cli, strings.concatenate({"no such harness: ", only, " (have: claude, pi)"}))
+				return fail(cli, phrase(cli, .Hooks_No_Harness, only))
 			}
 		case:
 			return fail(cli, usage)
@@ -241,7 +241,7 @@ cmd_hooks :: proc(cli: ^Cli, args: []string) -> int {
 		if exe == "" {
 			found, err := os.get_executable_path(context.allocator)
 			if err != nil {
-				return fail(cli, "cannot find this binary's own path")
+				return fail(cli, phrase(cli, .Hooks_No_Path))
 			}
 			exe = found
 		}

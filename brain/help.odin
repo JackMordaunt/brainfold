@@ -6,17 +6,17 @@ import "core:strings"
 import "../msg"
 import "../term"
 
-// print_usage prints the help. Plain, it is the English USAGE byte for
-// byte, which is what an agent reads; styled, the same text carries
-// weight: headings and command names bold, the repeated `brain` and the
-// closing notes dim. A saved language changes the words. The command
-// lines keep their English indent, which the catalog trims.
+// print_usage prints the help. Plain, it is the English USAGE constant,
+// byte for byte: an agent, a pipe, and --color=never. Styled, a person
+// sees the catalog in the saved language, with headings and command names
+// bold, the repeated `brain` and the closing notes dim. The command lines
+// keep their English indent, which the catalog trims.
 print_usage :: proc(cli: ^Cli) {
-	text := usage_text(cli)
 	if !term.styled(cli.style) {
-		out(cli, text)
+		out(cli, USAGE)
 		return
 	}
+	text := usage_text(cli)
 	s := cli.style
 	b := &cli.out
 	blanks := 0
