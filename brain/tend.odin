@@ -10,16 +10,18 @@ import "jm:sqlite3"
 
 // Tending is the sweep that keeps the vault true without anyone remembering
 // to look. Doctor, verify and learn can already see what goes wrong; tend
-// runs them, applies the changes that cost nothing to undo (a date on a
-// bullet whose claims all verified, an alias three sessions already asked
-// by), and puts everything that changes meaning in the inbox as an item a
-// person approves, beside the fact proposals: mark a note superseded, drop a
-// bullet whose every claim failed, merge two bullets with one name. Settle
-// runs it once a day when an agent stops, quickly and silently; `brain
-// tend` runs it by hand. The 2026-10-02 proof showed why the vault's state
-// is the product's: a stale note read as an answer, a fact living only in a
-// long note, and a reviewed inbox were what separated the good runs from
-// the bad.
+// runs them, applies the aliases three sessions already asked by, and puts
+// everything that changes meaning in the inbox as an item a person
+// approves, beside the fact proposals: date the bullets whose claims all
+// verified, mark a note superseded, drop a bullet whose every claim failed,
+// merge two bullets with one name. Dating that set is `brain tend date`,
+// one action, and the same inbox reminder. Settle runs the sweep once a
+// day when an agent stops, quickly and silently; `brain tend` runs it by
+// hand. The 2026-10-02 proof showed why the vault's state is the product's:
+// a stale note read as an answer, a fact living only in a long note, and a
+// reviewed inbox were what separated the good runs from the bad. A sweep
+// that re-dated 31 bullets on its first run is why a date changes only when
+// a person agrees.
 
 // TEND_FILE logs the hygiene items a person applied.
 TEND_FILE :: "AI/TENDED.md"
@@ -36,6 +38,12 @@ is_tend :: proc(b: Bullet) -> bool {
 }
 
 cmd_tend :: proc(cli: ^Cli, args: []string) -> int {
+	if len(args) > 0 && args[0] == "date" {
+		if len(args) != 1 {
+			return fail(cli, phrase(cli, .Usage_Tend))
+		}
+		return cmd_tend_date(cli)
+	}
 	quick, dry := false, false
 	for a in args {
 		switch a {
@@ -85,9 +93,10 @@ Tend_Result :: struct {
 	dated, aliases, proposed, lessons: int,
 }
 
-// tend is one sweep. Automatic: dates and aliases. Proposed: supersede,
-// drop, merge. quick leaves out the slow reads (commit claims, the
-// transcripts) for the Stop hook; dry changes nothing and counts.
+// tend is one sweep. Automatic: aliases. Proposed: date, supersede, drop,
+// merge. quick leaves out the slow reads (commit claims, the transcripts)
+// for the Stop hook; dry changes nothing and counts. Dating is not part of
+// the sweep: `brain tend date` does it, and so does approving the reminder.
 tend :: proc(cli: ^Cli, quick, dry: bool) -> (r: Tend_Result, err: string) {
 	db, oerr := open_index(cli)
 	if oerr != "" {
@@ -208,25 +217,82 @@ date_item :: proc(n: int) -> string {
 		{
 			"- **tend date verified bullets** (aliases: re-date, verified today) — ",
 			int_str(i64(n)),
-			" bullets make only claims that verify on this machine (paths, vault files, commands); approve dates them today, which is what a bullet's date means — tend date — ",
+			" bullets make only claims that verify on this machine (paths, vault files, commands); brain tend date dates them today, and so does approving this — tend date — ",
 			today_iso(),
 		},
 	)
 }
 
 // apply_date re-verifies and dates every bullet whose claims all pass.
-apply_date :: proc(cli: ^Cli) -> string {
-	if err := ensure_db(cli); err != "" {
-		return err
+// n is how many dates changed.
+apply_date :: proc(cli: ^Cli) -> (n: int, err: string) {
+	if err = ensure_db(cli); err != "" {
+		return
 	}
 	db, oerr := open_index(cli)
 	if oerr != "" {
-		return oerr
+		return 0, oerr
 	}
 	defer sqlite3.close(&db)
 	claims, _ := verify_all(cli, db, nil, quick = true)
-	apply_verified(cli, claims)
-	return ""
+	n = apply_verified(cli, claims)
+	return
+}
+
+// is_date_item is the reminder whose action is dating the verified set.
+is_date_item :: proc(b: Bullet) -> bool {
+	s := strings.trim_space(b.source)
+	return s == "tend date" || strings.has_prefix(s, "tend date ")
+}
+
+// cmd_tend_date dates the verified set and retires the reminder. Other
+// hygiene stays where it is. approve all does not do this.
+cmd_tend_date :: proc(cli: ^Cli) -> int {
+	n, err := apply_date(cli)
+	if err != "" {
+		return fail(cli, err)
+	}
+	if err = retire_date_items(cli); err != "" {
+		return fail(cli, err)
+	}
+	if cli.json {
+		w := jw_make()
+		jw_obj(&w)
+		jw_field_int(&w, "dated", i64(n))
+		jw_end_obj(&w)
+		jw_flush(cli, &w)
+		return 0
+	}
+	said(cli, .Verify_Dated, n)
+	return 0
+}
+
+// retire_date_items takes the date reminders out of the inbox and logs
+// them, once the dates are written. A quiet sync follows when any left.
+retire_date_items :: proc(cli: ^Cli) -> string {
+	lines, exists := read_inbox(cli)
+	if !exists {
+		return ""
+	}
+	kept := make([dynamic]Inbox_Line)
+	gone := make([dynamic]string)
+	for l in lines {
+		if l.is && is_date_item(l.bullet) {
+			append(&gone, l.text)
+			continue
+		}
+		append(&kept, l)
+	}
+	if len(gone) == 0 {
+		return ""
+	}
+	if err := write_inbox(cli, kept[:]); err != "" {
+		return err
+	}
+	for line in gone {
+		tend_log(cli, line)
+	}
+	return sync(cli, quiet = true)
 }
 
 // supersede_items proposes marking a dated note that TEND_NOTE_LINES or more
@@ -497,7 +563,8 @@ tend_apply :: proc(cli: ^Cli, b: Bullet) -> string {
 		return "not a hygiene item"
 	}
 	if words[1] == "date" {
-		return apply_date(cli)
+		_, err := apply_date(cli)
+		return err
 	}
 	if len(words) < 3 {
 		return "not a hygiene item"

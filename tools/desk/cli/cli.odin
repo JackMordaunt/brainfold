@@ -150,7 +150,10 @@ read :: proc(c: ^Client, q: Query, allocator := context.allocator) -> []byte {
 	case shapes.Inbox_Review:
 		r: shapes.Inbox_Review_Result
 		if q.handle != "" {
-			n, err := place_of(c, q.handle)
+			n, missing, err := place_of(c, q.handle)
+			if missing {
+				err = said(.Gone_Inbox, q.handle)
+			}
 			if err == "" {
 				r.error = call(c, {"--json", "inbox", "review", fmt.aprint(n)}, &r)
 			} else {
@@ -350,6 +353,8 @@ act :: proc(c: ^Client, cmd: shapes.Command, allocator := context.allocator) -> 
 		return settle_proposals(c, v.handles, "approve", v.to)
 	case shapes.Drop:
 		return settle_proposals(c, v.handles, "drop", "")
+	case shapes.Date_Verified:
+		return step(c, {"tend", "date"}, "")
 	case shapes.Sync_Now:
 		o = step(c, {"sync"}, "")
 		if o.ok && o.message == "" {
@@ -388,7 +393,10 @@ act :: proc(c: ^Client, cmd: shapes.Command, allocator := context.allocator) -> 
 		path := strings.trim_space(v.path)
 		return step(c, {"install", "--new", path}, said(.Vault_New, path))
 	case shapes.Merge:
-		n, err := place_of(c, v.proposal)
+		n, missing, err := place_of(c, v.proposal)
+		if missing {
+			err = said(.Gone_Inbox, v.proposal)
+		}
 		if err != "" {
 			return {done = true, message = err}
 		}
@@ -408,17 +416,26 @@ act :: proc(c: ^Client, cmd: shapes.Command, allocator := context.allocator) -> 
 }
 
 // settle_proposals approves or drops every proposal named, in order, each found
-// afresh, and says how it went: the first failure, if any, and how many
-// of the rest were done.
+// afresh. A row that has already left is reported and does not fail the
+// batch: the ones still there are done, and a real refusal is the only
+// failure.
 @(private)
 settle_proposals :: proc(c: ^Client, handles: []string, verb, to: string) -> shapes.Outcome_Result {
 	done_word := verb == "approve" ? msg.text(.Word_Approved) : msg.text(.Word_Dropped_Verb)
 	done := 0
+	kept := ""
 	first := ""
+	present := 0
+	gone := make([dynamic]string, context.temp_allocator)
 	for h in handles {
-		n, err := place_of(c, h)
+		n, missing, err := place_of(c, h)
+		if missing {
+			append(&gone, h)
+			continue
+		}
+		present += 1
 		if err == "" {
-			args := make([dynamic]string)
+			args := make([dynamic]string, context.temp_allocator)
 			append(&args, "inbox", verb, fmt.aprint(n))
 			if to != "" {
 				append(&args, "--to", to)
@@ -426,6 +443,7 @@ settle_proposals :: proc(c: ^Client, handles: []string, verb, to: string) -> sha
 			o := step(c, args[:], "")
 			if o.ok {
 				done += 1
+				kept = h
 				continue
 			}
 			err = o.message
@@ -434,17 +452,45 @@ settle_proposals :: proc(c: ^Client, handles: []string, verb, to: string) -> sha
 			first = err
 		}
 	}
+	note := gone_note(gone[:])
 	switch {
 	case len(handles) == 0:
 		return {done = true, message = msg.text(.Nothing_Selected)}
-	case done == len(handles) && done == 1:
-		return {done = true, ok = true, message = said(.Done_One, done_word, handles[0])}
-	case done == len(handles):
+	case first == "" && done == 1 && note == "":
+		return {done = true, ok = true, message = said(.Done_One, done_word, kept)}
+	case first == "" && done == len(handles):
 		return {done = true, ok = true, message = said(.Done_Many, done_word, done)}
-	case len(handles) == 1:
+	case first == "" && done > 0:
+		base := done == 1 ? said(.Done_One, done_word, kept) : said(.Done_Many, done_word, done)
+		return {done = true, ok = true, message = join_note(base, note)}
+	case first == "" && note != "":
+		return {done = true, message = note}
+	case present == 1 && note == "":
 		return {done = true, message = first}
 	}
-	return {done = true, message = said(.Done_Partial, done_word, done, len(handles), first)}
+	return {done = true, message = join_note(said(.Done_Partial, done_word, done, present, first), note)}
+}
+
+// gone_note names each handle that was no longer in the inbox.
+@(private)
+gone_note :: proc(gone: []string) -> string {
+	if len(gone) == 0 {
+		return ""
+	}
+	parts := make([dynamic]string, context.temp_allocator)
+	for h in gone {
+		append(&parts, said(.Gone_Inbox, h))
+	}
+	return strings.join(parts[:], "; ")
+}
+
+// join_note appends a gone note to what the batch otherwise says.
+@(private)
+join_note :: proc(base, note: string) -> string {
+	if note == "" {
+		return base
+	}
+	return strings.concatenate({base, "; ", note})
 }
 
 // edit runs a bullet command and says how it went: where the bullet is
@@ -511,18 +557,19 @@ at_args :: proc(args: []string, at: string) -> []string {
 }
 
 // place_of finds a proposal's place in the inbox now, by its handle.
+// missing is a row that has left; err is a read that failed.
 @(private)
-place_of :: proc(c: ^Client, handle: string) -> (n: int, err: string) {
+place_of :: proc(c: ^Client, handle: string) -> (n: int, missing: bool, err: string) {
 	in_: shapes.Inbox_Result
 	if e := call(c, {"inbox", "--json"}, &in_); e != "" {
-		return 0, e
+		return 0, false, e
 	}
 	for p in in_.proposals {
 		if p.handle == handle {
-			return p.n, ""
+			return p.n, false, ""
 		}
 	}
-	return 0, said(.Gone_Inbox, handle)
+	return 0, true, ""
 }
 
 // step runs one CLI call for a command: said on success, or the first

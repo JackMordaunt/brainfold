@@ -34,6 +34,7 @@ proposals_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		}
 	}
 	n := len(m.selected)
+	facts := fact_handles(m, ps)
 	ui.row(gtx, gap = 8, align = .Center)
 	all := n == len(ps) && n > 0
 	if primer.checkbox(gtx, &all, tr(m, .Select_All), indeterminate = n > 0 && n < len(ps), state = len(ps) == 0 ? .Disabled : .Live) {
@@ -42,14 +43,22 @@ proposals_bar :: proc(gtx: ^ui.Ctx, m: ^Model) {
 		}
 	}
 	ui.fill_space(gtx)
-	none := n == 0
-	// In a narrow pane the buttons keep their icons and counts and give up
-	// their words; their names still say what they do.
+	none := len(facts) == 0
+	// In a narrow pane the buttons keep their icons and give up their words;
+	// their names still say what they do.
 	words := gtx.constraints.max.x >= 330
-	if primer.button(gtx, words ? tr(m, .Approve) : "", .Primary, .Small, leading = .Check, count = none ? "" : digits(m, n), inactive = none, name = tr(m, .Approve_Selected)) && !none {
+	dating := waiting_on(m, .Date)
+	// An icon, so Approve and Drop keep their words in the list's widest pane.
+	if icon_action(gtx, .Calendar, tr(m, .Date), .Default, .Small, loading = dating, description = tr(m, .Date_Verified)) && !dating {
+		m.confirm, m.bulk = true, .Date
+	}
+	// No count badge: the list pane is already full once Date sits beside
+	// these, and the dialog names how many.
+	if primer.button(gtx, words ? tr(m, .Approve) : "", .Primary, .Small, leading = .Check, inactive = none, name = tr(m, .Approve_Selected)) && !none {
 		m.confirm, m.bulk = true, .Approve
 	}
-	if primer.button(gtx, words ? tr(m, .Drop) : "", .Danger, .Small, leading = .X, count = none ? "" : digits(m, n), inactive = none, name = tr(m, .Drop_Selected)) && !none {
+	drop_none := n == 0
+	if primer.button(gtx, words ? tr(m, .Drop) : "", .Danger, .Small, leading = .X, inactive = drop_none, name = tr(m, .Drop_Selected)) && !drop_none {
 		m.confirm, m.bulk = true, .Drop
 	}
 }
@@ -102,7 +111,11 @@ page_inbox :: proc(gtx: ^ui.Ctx, m: ^Model) {
 					select(m, p.handle, ticked)
 				}
 			}
-			bw := w[0].x - 16 - 8 - 8 - CHECKBOX
+			{
+				ui.sized(gtx, {min = {FROM_W, 0}, max = {FROM_W, ui.INF}})
+				primer.text(gtx, inbox_from(p.source), .Small, color = m.scheme[.Fg_Color_Muted], key = 7)
+			}
+			bw := w[0].x - 16 - 8 - 8 - CHECKBOX - 8 - FROM_W
 			ui.sized(gtx, {min = {bw, 0}, max = {bw, ui.INF}})
 			if row_button(gtx, p.handle, i == idx, key = 6) {
 				choose(&m.proposal, p.handle)
@@ -121,21 +134,29 @@ page_inbox :: proc(gtx: ^ui.Ctx, m: ^Model) {
 }
 
 CHECKBOX :: 16 // Primer's checkbox, square
+FROM_W :: 64 // room for tend, settle, or propose beside the handle
 
-// proposal_actions is the proposal's footer: approve it or drop it.
+// proposal_actions is the proposal's footer: approve it or drop it. The
+// date reminder's action is Date, which dates the verified set at once.
 proposal_actions :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	handle := chosen(&m.proposal)
 	if handle == "" {
 		return
 	}
+	p, _ := proposal_by(gtx, handle)
+	dating := waiting_on(m, .Date)
 	approving := waiting_on(m, .Approve, handle)
 	dropping := waiting_on(m, .Drop, handle)
-	busy := approving || dropping
+	busy := approving || dropping || dating
 	ui.row(gtx, gap = 8, align = .Center)
-	if primer.button(gtx, tr(m, .Approve), .Primary, leading = .Check, loading = approving, inactive = dropping, name = tf(m, .Approve_One, handle)) && !busy {
+	if is_date_source(p.source) {
+		if primer.button(gtx, tr(m, .Date), .Primary, leading = .Calendar, loading = dating, inactive = dropping, name = tr(m, .Date_Verified)) && !busy {
+			send(gtx, m, .Date, {handle})
+		}
+	} else if primer.button(gtx, tr(m, .Approve), .Primary, leading = .Check, loading = approving, inactive = dropping || dating, name = tf(m, .Approve_One, handle)) && !busy {
 		send(gtx, m, .Approve, {handle})
 	}
-	if primer.button(gtx, tr(m, .Drop), .Danger, leading = .X, loading = dropping, inactive = approving, name = tf(m, .Drop_One, handle)) && !busy {
+	if primer.button(gtx, tr(m, .Drop), .Danger, leading = .X, loading = dropping, inactive = approving || dating, name = tf(m, .Drop_One, handle)) && !busy {
 		send(gtx, m, .Drop, {handle})
 	}
 }
@@ -168,6 +189,71 @@ proposal :: proc(gtx: ^ui.Ctx, m: ^Model, p: shapes.Proposal) {
 		ui.close(&b)
 	}
 	proposal_review(gtx, m, p)
+}
+
+// inbox_from is where a proposal came from: the first word of its source.
+// tend and settle are named; everything else was proposed. "tender" is
+// not tend. The word is not translated.
+inbox_from :: proc(source: string) -> string {
+	s := strings.trim_space(source)
+	end := len(s)
+	for i in 0 ..< len(s) {
+		if s[i] == ' ' || s[i] == ':' {
+			end = i
+			break
+		}
+	}
+	word := s[:end]
+	if strings.equal_fold(word, "tend") {
+		return "tend"
+	}
+	if strings.equal_fold(word, "settle") {
+		return "settle"
+	}
+	return "propose"
+}
+
+is_tend_source :: proc(source: string) -> bool {
+	return inbox_from(source) == "tend"
+}
+
+// is_date_source is the tend reminder that dates the verified set.
+is_date_source :: proc(source: string) -> bool {
+	s := strings.trim_space(source)
+	return s == "tend date" || strings.has_prefix(s, "tend date ")
+}
+
+proposal_by :: proc(gtx: ^ui.Ctx, handle: string) -> (p: shapes.Proposal, ok: bool) {
+	inbox, st := ui.need(gtx, shapes.Inbox{}, shapes.Inbox_Result)
+	if !ready(st) {
+		return
+	}
+	for q in inbox.proposals {
+		if q.handle == handle {
+			return q, true
+		}
+	}
+	return
+}
+
+// fact_handles is the ticked proposals approve may take. Hygiene stays
+// for its own action. A tick whose row has left is still named, so the
+// batch can say it left.
+fact_handles :: proc(m: ^Model, ps: []shapes.Proposal) -> []string {
+	out := make([dynamic]string, context.temp_allocator)
+	for h in m.selected {
+		src := ""
+		for p in ps {
+			if p.handle == h {
+				src = p.source
+				break
+			}
+		}
+		if !is_tend_source(src) {
+			append(&out, h)
+		}
+	}
+	return out[:]
 }
 
 has_handle :: proc(ps: []shapes.Proposal, handle: string) -> bool {
@@ -211,33 +297,50 @@ bulk_confirm :: proc(gtx: ^ui.Ctx, m: ^Model) {
 	if !m.confirm {
 		return
 	}
-	n := len(m.selected)
-	if n == 0 {
+	inbox, st := ui.need(gtx, shapes.Inbox{}, shapes.Inbox_Result)
+	ps := ready(st) ? inbox.proposals : nil
+	facts := fact_handles(m, ps)
+	named := m.bulk == .Approve ? facts : m.selected[:]
+	n := len(named)
+	if m.bulk != .Date && n == 0 {
 		m.confirm = false
 		return
 	}
-	names := strings.join(m.selected[:min(n, 5)], ", ", context.temp_allocator)
+	names := strings.join(named[:min(n, 5)], ", ", context.temp_allocator)
 	if n > 5 {
 		names = tf(m, .And_More, names, n - 5)
 	}
 	what := tf(m, .Proposal, n)
 	title, body, verb: string
 	variant: primer.Button_Variant
-	if m.bulk == .Approve {
+	#partial switch m.bulk {
+	case .Date:
+		title = tr(m, .Date_Ask)
+		body = tr(m, .Date_Body)
+		verb, variant = tr(m, .Date), .Primary
+	case .Approve:
 		title = tf(m, .Approve_Ask, what)
 		body = tf(m, .Approve_Body, names)
 		verb, variant = tr(m, .Approve), .Primary
-	} else {
+	case .Drop:
 		title = tf(m, .Drop_Ask, what)
 		body = tf(m, .Drop_Inbox_Body, names)
 		verb, variant = tr(m, .Drop), .Danger
 	}
+	if verb == "" {
+		m.confirm = false
+		return
+	}
 	if primer.confirmation_dialog(gtx, &m.confirm, title, body, confirm_content = verb, confirm_type = variant) == .Confirm {
-		send(gtx, m, m.bulk, m.selected[:])
-		for h in m.selected {
-			delete(h, m.allocator)
+		if m.bulk == .Date {
+			send(gtx, m, .Date)
+		} else {
+			send(gtx, m, m.bulk, named)
+			for h in m.selected {
+				delete(h, m.allocator)
+			}
+			clear(&m.selected)
 		}
-		clear(&m.selected)
 	}
 }
 

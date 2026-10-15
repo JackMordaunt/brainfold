@@ -155,10 +155,43 @@ a_batch_finds_each_by_handle :: proc(t: ^testing.T) {
 	testing.expect(t, o.ok, o.message)
 	testing.expect_value(t, o.message, "Approved 2 proposals")
 
-	// One gone, one done: not ok, and both counted.
+	// One gone, one the CLI refuses: the refusal fails the batch, and the
+	// one that left is still named.
 	part := act(&client, shapes.Drop{id = 2, handles = {"gone", "a"}}, context.temp_allocator)
 	testing.expect(t, !part.ok)
-	testing.expect_value(t, part.message, "Dropped 0 of 2; gone is no longer in the inbox")
+	testing.expect_value(t, part.message, "Dropped 0 of 1; unknown command; gone is no longer in the inbox")
+}
+
+// A row that left does not fail the batch: the ones still there are
+// approved, and the one that left is reported.
+@(test)
+a_batch_approves_what_is_still_there :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["inbox --json"] = `{"proposals":[{"n":1,"handle":"a"},{"n":2,"handle":"b"}]}`
+	c.answers["inbox approve 1"] = "ok"
+	c.answers["inbox approve 2"] = "ok"
+	o := act(&client, shapes.Approve{id = 1, handles = {"gone", "a", "b"}}, context.temp_allocator)
+	testing.expect(t, o.ok, o.message)
+	testing.expect_value(t, o.message, "Approved 2 proposals; gone is no longer in the inbox")
+
+	// Every named row has left: nothing was approved, and each is named.
+	none := act(&client, shapes.Drop{id = 2, handles = {"gone", "also"}}, context.temp_allocator)
+	testing.expect(t, none.done && !none.ok)
+	testing.expect_value(t, none.message, "gone is no longer in the inbox; also is no longer in the inbox")
+}
+
+// Dating the verified set is one command. The desk does not approve the
+// reminder one row at a time.
+@(test)
+dating_is_one_command :: proc(t: ^testing.T) {
+	c: Canned
+	client := canned(&c)
+	c.answers["tend date"] = "dated today: 74 bullets whose claims all passed"
+	o := act(&client, shapes.Date_Verified{id = 1}, context.temp_allocator)
+	testing.expect(t, o.ok, o.message)
+	testing.expect_value(t, o.message, "dated today: 74 bullets whose claims all passed")
+	testing.expect_value(t, c.calls[len(c.calls) - 1], "tend date")
 }
 
 // A bullet's provenance is asked for by its place, and a proposal the

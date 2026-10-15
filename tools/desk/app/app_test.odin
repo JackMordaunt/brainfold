@@ -68,6 +68,8 @@ rig_open :: proc(r: ^Rig, poll := POLL) {
 	answer(&r.f, "ledger --json", `{"baseline_tokens":32296,"callers":[{"caller":"claude","sessions":4,"lookups":10,"answered":9,"tokens_returned":6200,"tokens_saved":300000}],"days":[{"day":"2026-10-07","lookups":10,"answered":9,"tokens_returned":6200,"tokens_saved":300000}]}`)
 	answer(&r.f, "inbox --json", `{"proposals":[{"n":1,"handle":"tend date verified bullets","fact":"33 bullets verify","source":"tend date","date":"2026-10-02"},{"n":2,"handle":"jm:ui layout stance","fact":"kits clone the look","source":"session","date":"2026-10-03"}]}`)
 	answer(&r.f, "inbox approve 1", "approved")
+	answer(&r.f, "inbox approve 2", "approved")
+	answer(&r.f, "tend date", "dated today: 33 bullets whose claims all passed")
 	answer(&r.f, "recall --json --limit 30 hyprctl", `[{"id":"85801a30","date":"2026-09-22","agent":"pi","title":"Dedicated workspace per project","snippet":"use eval"}]`)
 	answer(&r.f, "recall --json --around 85801a30", `{"id":"85801a30","session":"s1","title":"Dedicated workspace per project","turns":[{"id":"a0","ts":"2026-09-22T13:02:00Z","role":"user","body":"make each project its own workspace","hit":false},{"id":"85801a30","ts":"2026-09-22T13:05:00Z","role":"assistant","body":"use eval","hit":true}]}`)
 	init(&r.h, {exec = fake_exec, user = &r.f}, poll = poll)
@@ -171,16 +173,19 @@ approving_runs_the_cli_and_says_so :: proc(t: ^testing.T) {
 	r.m.page = .Inbox
 	testing.expect(t, settle(&r))
 	testing.expect(t, shows(&r, "jm:ui layout stance"))
+	// The first row is the date reminder. A fact is approved from its own
+	// footer, which is drawn after the bar.
+	testing.expect(t, ui.probe_click(&r.p, "jm:ui layout stance"), "the fact")
 	reads := times_asked(&r.f, "inbox --json")
-	// The detail pane's Approve, drawn after the bulk one: the first
-	// proposal's, which is the one shown.
 	testing.expect(t, ui.probe_click_top(&r.p, "Approve"), "the button")
 	testing.expect(t, settle(&r))
-	testing.expect_value(t, times_asked(&r.f, "inbox approve 1"), 1)
+	testing.expect_value(t, times_asked(&r.f, "inbox approve 2"), 1)
+	testing.expect_value(t, times_asked(&r.f, "inbox approve 1"), 0)
 	testing.expect_value(t, r.m.n_pending, 0)
-	testing.expect(t, shows(&r, "Approved tend date verified bullets"), "a toast")
-	// One read to find its place, one after it is done.
-	testing.expect_value(t, times_asked(&r.f, "inbox --json"), reads + 2)
+	testing.expect(t, shows(&r, "Approved jm:ui layout stance"), "a toast")
+	// One read to find its place, one after it is done. A poll may land
+	// in the same stretch, so the count is at least those two.
+	testing.expect(t, times_asked(&r.f, "inbox --json") >= reads + 2)
 }
 
 @(test)

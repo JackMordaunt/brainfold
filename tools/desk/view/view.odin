@@ -170,6 +170,7 @@ Pending :: struct {
 Pending_Kind :: enum u8 {
 	Approve,
 	Drop,
+	Date,
 	Sync,
 	Reindex,
 	Review,
@@ -900,6 +901,8 @@ send :: proc(gtx: ^ui.Ctx, m: ^Model, kind: Pending_Kind, handles: []string = ni
 		ui.command(gtx, shapes.Command(shapes.Approve{id = id, handles = handles, to = arg}))
 	case .Drop:
 		ui.command(gtx, shapes.Command(shapes.Drop{id = id, handles = handles}))
+	case .Date:
+		ui.command(gtx, shapes.Command(shapes.Date_Verified{id = id}))
 	case .Sync:
 		ui.command(gtx, shapes.Command(shapes.Sync_Now{id = id}))
 	case .Reindex:

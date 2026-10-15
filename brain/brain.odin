@@ -344,10 +344,10 @@ Share
                              automatic at session start and stop; on|off for this machine,
                              status, connect <url>|github
 Keep it healthy
-  brain tend                 keep the vault true: date what verifies, add the aliases queries
-                             use, and put the rest in the inbox as actions a person approves
-                             (mark a note superseded, drop a bullet whose claims failed, merge
-                             duplicates); runs once a day when an agent stops; --quick, --dry-run
+  brain tend                 keep the vault true: brain tend date dates what verifies,
+                             aliases queries already use are added, and the rest waits
+                             in the inbox for a person (supersede a note, drop a failed
+                             bullet, merge duplicates); once a day at stop; --quick, --dry-run
   brain doctor               what is stale, thin, oversized, duplicated or orphaned, which
                              notes a newer bullet may have superseded, which claims failed
                              verify, which bullets were served just before a correction

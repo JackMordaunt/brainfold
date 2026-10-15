@@ -475,7 +475,7 @@ cmd_settle :: proc(cli: ^Cli, args: []string) -> int {
 	reason := strings.builder_make()
 	strings.write_string(
 		&reason,
-		"brain settle: this session edited files and proposed nothing to memory. For each durable fact it settled (a decision and why, a path, a command that worked, a constraint), run `brain propose '- **handle** (aliases: what a searcher might type) — fact'`. If nothing durable was settled, reply none and stop.",
+		"brain settle: this session edited files and proposed nothing to memory. For each durable fact it settled (a decision and why, a path, a command that worked, a constraint), run `brain propose '- **handle** (aliases: what a searcher might type) — fact — settle'`. If nothing durable was settled, reply none and stop.",
 	)
 	// Half of what settle drew out of the proof's task sessions (sonnet,
 	// 2026-10-02) described the file just written. The files are named so

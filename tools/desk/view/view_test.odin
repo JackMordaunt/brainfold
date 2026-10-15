@@ -175,6 +175,89 @@ a_bulk_approve_asks_first_and_sends_one_command :: proc(t: ^testing.T) {
 	testing.expect(t, !waiting_on(&m, .Approve, "b"))
 }
 
+// Approve takes the ticked facts and leaves hygiene. Date is its own
+// command, asked first from the bar, and the date row sends it at once.
+@(test)
+dating_is_one_action_and_approve_skips_hygiene :: proc(t: ^testing.T) {
+	m: Model
+	p: ui.Probe
+	open(&p, &m, .Inbox)
+	defer close(&p, &m)
+	ui.probe_deliver(&p, shapes.Inbox{}, shapes.Inbox_Result{proposals = {
+		{n = 1, handle = "tend date verified bullets", source = "tend date", fact = "1 bullets verify"},
+		{n = 2, handle = "a fact", source = "session", fact = "one"},
+		{n = 3, handle = "another", source = "claude", fact = "two"},
+	}})
+	ui.probe_frame(&p)
+	testing.expect(t, ui.probe_click(&p, "Select all"))
+	testing.expect_value(t, len(m.selected), 3)
+	testing.expect(t, ui.probe_click(&p, "Approve"))
+	ui.probe_advance(&p, 20, 1.0 / 60)
+	testing.expect(t, ui.probe_click_top(&p, "Approve"), "the dialog's confirm")
+	sent: []string
+	for c in ui.probe_commands(&p) {
+		if cmd, ok := ui.command_as(c, shapes.Command); ok {
+			if a, is := cmd.(shapes.Approve); is {
+				sent = a.handles
+			}
+		}
+	}
+	testing.expect_value(t, len(sent), 2)
+	if len(sent) == 2 {
+		testing.expect_value(t, sent[0], "a fact")
+		testing.expect_value(t, sent[1], "another")
+	}
+
+	ui.probe_deliver(&p, shapes.Outcome{id = m.pending[0].id}, shapes.Outcome_Result{done = true, ok = true, message = "Approved 2 proposals"})
+	ui.probe_frame(&p)
+	testing.expect_value(t, m.n_pending, 0)
+	testing.expect(t, ui.probe_click(&p, "Date"), "the bar asks first")
+	ui.probe_advance(&p, 20, 1.0 / 60)
+	testing.expect(t, m.confirm)
+	testing.expect_value(t, m.n_pending, 0)
+	testing.expect(t, ui.probe_click_top(&p, "Date"), "the dialog's confirm")
+	dated := false
+	for c in ui.probe_commands(&p) {
+		if cmd, ok := ui.command_as(c, shapes.Command); ok {
+			_, dated = cmd.(shapes.Date_Verified)
+		}
+	}
+	testing.expect(t, dated, "one date command")
+	testing.expect(t, waiting_on(&m, .Date))
+
+	// The date row itself sends that command, without the dialog.
+	m2: Model
+	p2: ui.Probe
+	open(&p2, &m2, .Inbox)
+	defer close(&p2, &m2)
+	ui.probe_deliver(&p2, shapes.Inbox{}, shapes.Inbox_Result{proposals = {{n = 1, handle = "tend date verified bullets", source = "tend date"}}})
+	ui.probe_frame(&p2)
+	testing.expect(t, ui.probe_click_top(&p2, "Date"), "the row's Date")
+	testing.expect(t, !m2.confirm)
+	testing.expect(t, waiting_on(&m2, .Date, "tend date verified bullets"))
+}
+
+// Each row says whether it came from settle, tend, or propose.
+@(test)
+a_row_names_where_it_came_from :: proc(t: ^testing.T) {
+	m: Model
+	p: ui.Probe
+	open(&p, &m, .Inbox)
+	defer close(&p, &m)
+	ui.probe_deliver(&p, shapes.Inbox{}, shapes.Inbox_Result{proposals = {
+		{n = 1, handle = "a", source = "tend date"},
+		{n = 2, handle = "b", source = "settle"},
+		{n = 3, handle = "c", source = "recall:abc"},
+		{n = 4, handle = "d", source = "tender notes"},
+	}})
+	ui.probe_frame(&p)
+	testing.expect(t, ui.probe_tagged(&p, "tend"))
+	testing.expect(t, ui.probe_tagged(&p, "settle"))
+	testing.expect(t, ui.probe_tagged(&p, "propose"))
+	testing.expect(t, !ui.probe_tagged(&p, "tender"))
+	testing.expect(t, !ui.probe_tagged(&p, "recall"))
+}
+
 // A tick for a proposal no longer in the inbox is let go.
 @(test)
 ticks_follow_the_inbox :: proc(t: ^testing.T) {

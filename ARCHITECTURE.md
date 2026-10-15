@@ -121,14 +121,16 @@ hooks to do it for them.
 
 `brain tend` is the sweep that keeps the vault true without anyone running
 it: settle calls it once a day, quickly and silently, when an agent stops,
-and `brain tend` runs it by hand. It dates every bullet whose claims all
-verify and adds the aliases three sessions already asked by, both free to
-undo through the vault's history, and puts what changes meaning in the
-inbox as hygiene items beside the fact proposals: mark a dated note that
-retells newer bullets as superseded, drop a bullet whose every claim
-failed, merge two bullets with one name. `brain inbox approve <n>` applies
-an item and logs it in `AI/TENDED.md`; `drop` dismisses it for good;
-`approve all` leaves hygiene items for a person. The items never answer a
+and `brain tend` runs it by hand. It adds the aliases three sessions already
+asked by, free to undo through the vault's history, and puts what changes
+meaning in the inbox as hygiene items beside the fact proposals: date every
+bullet whose claims all verify, mark a dated note that retells newer bullets
+as superseded, drop a bullet whose every claim failed, merge two bullets
+with one name. Dating that verified set is `brain tend date`, one action;
+approving the same inbox reminder does it too. A date changes only when a
+person agrees. `brain inbox approve <n>` applies an item and logs it in
+`AI/TENDED.md`; `drop` dismisses it for good; `approve all` leaves hygiene
+items, including the date reminder, for a person. The items never answer a
 find. Why it exists is the 2026-10-02 proof: the vault's state was what
 separated the good runs from the bad.
 

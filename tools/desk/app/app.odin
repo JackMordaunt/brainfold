@@ -352,7 +352,7 @@ clone_command :: proc(c: shapes.Command, allocator: mem.Allocator) -> shapes.Com
 		return shapes.Unlink{v.id, strings.clone(v.file, allocator), v.line, strings.clone(v.target, allocator)}
 	case shapes.Set_Vault:
 		return shapes.Set_Vault{v.id, strings.clone(v.path, allocator)}
-	case shapes.Sync_Now, shapes.Reindex, shapes.Run_Doctor:
+	case shapes.Sync_Now, shapes.Reindex, shapes.Run_Doctor, shapes.Date_Verified:
 		return c
 	}
 	return c
@@ -568,7 +568,7 @@ act_one :: proc(h: ^Host, a: Act) -> Act_Done {
 	// made again, so the page shows the vault as the edit left it and
 	// a fixed finding leaves its list.
 	#partial switch _ in a.cmd {
-	case shapes.Approve, shapes.Drop, shapes.Merge, shapes.Add_Alias, shapes.Remove_Alias, shapes.Write_Bullet, shapes.Replace_Bullet, shapes.Drop_Bullet, shapes.Touch_Bullet, shapes.Unlink:
+	case shapes.Approve, shapes.Drop, shapes.Date_Verified, shapes.Merge, shapes.Add_Alias, shapes.Remove_Alias, shapes.Write_Bullet, shapes.Replace_Bullet, shapes.Drop_Bullet, shapes.Touch_Bullet, shapes.Unlink:
 		if o.ok && doctor_shown(h) {
 			d := run_doctor(h, a, mem.dynamic_arena_allocator(&arena))
 			delete(d.outcome.message, h.allocator)

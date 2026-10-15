@@ -122,3 +122,46 @@ settle_tends_once_a_day :: proc(t: ^testing.T) {
 	inbox, _ = path.read(path.join(f.vault, "AI", "INBOX.md"))
 	testing.expect(t, strings.contains(inbox, "tend supersede"), "hygiene items wait for a person")
 }
+
+// Dating the verified set is one action. It dates what verifies, retires
+// the date reminder, and leaves the other hygiene items for a person.
+// approve all still does not apply them.
+@(test)
+tend_date_dates_the_verified_set :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	o, e, code := exec(f.cli, "tend")
+	testing.expect_value(t, code, 0)
+	inbox, _ := path.read(path.join(f.vault, "AI", "INBOX.md"))
+	testing.expect(t, strings.contains(inbox, "**tend date verified bullets**"), inbox)
+	testing.expect(t, strings.contains(inbox, "tend supersede"), inbox)
+
+	_, e, code = exec(f.cli, "tend", "date", "--quick")
+	testing.expect_value(t, code, 1)
+	testing.expect(t, strings.contains(e, "brain tend date"), e)
+
+	o, e, code = exec(f.cli, "tend", "date")
+	testing.expect_value(t, code, 0)
+	testing.expect_value(t, e, "")
+	testing.expect(t, strings.contains(o, "dated today:"), o)
+	mem, _ := path.read(path.join(f.vault, "AI", "MEMORY.md"))
+	testing.expect(t, strings.contains(mem, strings.concatenate({"`brain sync` rebuilds it — fixture — ", today_iso()})), mem)
+	inbox, _ = path.read(path.join(f.vault, "AI", "INBOX.md"))
+	testing.expect(t, !strings.contains(inbox, "tend date"), inbox)
+	testing.expect(t, strings.contains(inbox, "tend supersede"), "other hygiene stays")
+	tended, _ := path.read(path.join(f.vault, "AI", "TENDED.md"))
+	testing.expect(t, strings.contains(tended, "tend date verified bullets"), tended)
+
+	o, _, code = exec(f.cli, "--json", "tend", "date")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, `"dated":`), o)
+
+	_, _, code = exec(f.cli, "propose", "- **a fact** (aliases: fact) — a plain fact for the inbox — fixture — 2026-01-06")
+	testing.expect_value(t, code, 0)
+	o, _, code = exec(f.cli, "inbox", "approve", "all")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "**a fact**") && !strings.contains(o, "tend supersede"), o)
+	inbox, _ = path.read(path.join(f.vault, "AI", "INBOX.md"))
+	testing.expect(t, strings.contains(inbox, "tend supersede"), "approve all still leaves hygiene")
+}

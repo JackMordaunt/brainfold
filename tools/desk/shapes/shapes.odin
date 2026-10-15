@@ -507,6 +507,7 @@ Outcome_Result :: struct {
 Command :: union {
 	Approve,
 	Drop,
+	Date_Verified,
 	Sync_Now,
 	Reindex,
 	Set_Review,
@@ -539,6 +540,12 @@ Approve :: struct {
 Drop :: struct {
 	id:      u64,
 	handles: []string,
+}
+
+// Date_Verified dates every bullet whose claims all pass, and retires the
+// inbox reminder. It does not approve anything else.
+Date_Verified :: struct {
+	id: u64,
 }
 
 // Sync_Now sends what changed here and receives what other machines wrote.
@@ -672,6 +679,8 @@ command_id :: proc(c: Command) -> u64 {
 	case Approve:
 		return v.id
 	case Drop:
+		return v.id
+	case Date_Verified:
 		return v.id
 	case Sync_Now:
 		return v.id

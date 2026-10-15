@@ -586,7 +586,7 @@ propose_queues_and_inbox_approves :: proc(t: ^testing.T) {
 	testing.expect_value(t, code, 0)
 	o, _, code = exec(f.cli, "inbox")
 	testing.expect_value(t, code, 0)
-	testing.expect(t, strings.has_prefix(o, "#1 - **new thing**") && strings.contains(o, "\n#2 - **second**"), o)
+	testing.expect(t, strings.has_prefix(o, "#1  propose  - **new thing**") && strings.contains(o, "\n#2  propose  - **second**"), o)
 	o, _, code = exec(f.cli, "inbox", "approve", "1", "--to", "LEARNINGS")
 	testing.expect_value(t, code, 0)
 	testing.expect(t, strings.has_prefix(o, "approved #1 **new thing** -> AI/LEARNINGS.md"), o)
@@ -602,6 +602,36 @@ propose_queues_and_inbox_approves :: proc(t: ^testing.T) {
 	testing.expect_value(t, o, "inbox empty\n")
 	_, _, code = exec(f.cli, "inbox", "approve", "1")
 	testing.expect_value(t, code, 1)
+}
+
+// The list says where each row came from: tend, settle, or else propose.
+@(test)
+inbox_names_where_a_row_came_from :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	_, _, code := exec(f.cli, "review", "before")
+	testing.expect_value(t, code, 0)
+	_, _, code = exec(f.cli, "propose", "- **from settle** — a fact an agent settled — settle — 2026-01-06")
+	testing.expect_value(t, code, 0)
+	_, _, code = exec(f.cli, "propose", "- **from agent** — a fact a person was asked — claude — 2026-01-06")
+	testing.expect_value(t, code, 0)
+	_, _, code = exec(f.cli, "propose", "- **from tend** — a hygiene reminder — tend date — 2026-01-06")
+	testing.expect_value(t, code, 0)
+	_, _, code = exec(f.cli, "propose", "- **from recall** — a lesson — recall:abc — 2026-01-06")
+	testing.expect_value(t, code, 0)
+	_, _, code = exec(f.cli, "propose", "- **from tender** — not hygiene — tender notes — 2026-01-06")
+	testing.expect_value(t, code, 0)
+	o: string
+	o, _, code = exec(f.cli, "inbox")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "#1  settle  - **from settle**"), o)
+	testing.expect(t, strings.contains(o, "#2  propose  - **from agent**"), o)
+	testing.expect(t, strings.contains(o, "#3  tend  - **from tend**"), o)
+	testing.expect(t, strings.contains(o, "#4  propose  - **from recall**"), o)
+	testing.expect(t, strings.contains(o, "#5  propose  - **from tender**"), o)
+	o, _, code = exec(f.cli, "--json", "inbox")
+	testing.expect(t, strings.contains(o, `"from":"settle"`) && strings.contains(o, `"from":"tend"`) && strings.contains(o, `"from":"propose"`), o)
 }
 
 // `brain inbox approve all` moves every proposal into one core file in

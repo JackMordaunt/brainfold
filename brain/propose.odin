@@ -326,6 +326,29 @@ complete_bullet :: proc(line, caller: string) -> string {
 	return strings.concatenate({line, SEP, today_iso()})
 }
 
+// inbox_from is where a proposal came from: the first word of its source,
+// split on a space or a colon. tend and settle are named; everything else
+// was proposed. "tender" is not tend. The word is not translated, and the
+// stored source is left as written.
+inbox_from :: proc(source: string) -> string {
+	s := strings.trim_space(source)
+	end := len(s)
+	for i in 0 ..< len(s) {
+		if s[i] == ' ' || s[i] == ':' {
+			end = i
+			break
+		}
+	}
+	word := s[:end]
+	if strings.equal_fold(word, "tend") {
+		return "tend"
+	}
+	if strings.equal_fold(word, "settle") {
+		return "settle"
+	}
+	return "propose"
+}
+
 // Inbox_Line is one line of the inbox file, and whether it is a proposal.
 Inbox_Line :: struct {
 	text:   string,
@@ -388,11 +411,12 @@ cmd_inbox :: proc(cli: ^Cli, args: []string) -> int {
 				jw_field(&w, "aliases", l.bullet.aliases)
 				jw_field(&w, "fact", l.bullet.fact)
 				jw_field(&w, "source", l.bullet.source)
+				jw_field(&w, "from", inbox_from(l.bullet.source))
 				jw_field(&w, "date", l.bullet.date)
 				jw_field(&w, "line", l.text)
 				jw_end_obj(&w)
 			} else {
-				outf(cli, "#%d %s\n", n, l.text)
+				outf(cli, "#%d  %s  %s\n", n, inbox_from(l.bullet.source), l.text)
 			}
 		}
 		if cli.json {

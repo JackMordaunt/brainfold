@@ -69,9 +69,9 @@ Share
                              copilot, gemini, cursor, cline, kiro
   brain mcp                  the same tools over MCP on stdio, for agents without a shell
 Keep it healthy
-  brain tend                 sweep the vault: aliases now; supersede, drop, merge and date
-                             as inbox items a person approves; runs daily at Stop;
-                             --quick, --dry-run
+  brain tend                 sweep the vault: aliases now; supersede, drop and merge
+                             as inbox items; brain tend date dates what verifies;
+                             runs daily at Stop; --quick, --dry-run
   brain doctor               what is stale, thin, oversized, duplicated or orphaned, which
                              notes a newer bullet may have superseded, which claims failed
   brain learn                query words to wire as aliases, aliases nobody asks for; --apply
