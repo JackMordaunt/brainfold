@@ -39,7 +39,9 @@ PRIME_HINT :: "# brain: nothing in the vault names this prompt; `brain find <ter
 // replies runs one short of what the session said.
 SETTLE_CORRECTIONS :: 5 // corrections quoted back at most
 
-// Words a prompt is full of that name nothing in a vault.
+// Words a prompt is full of that name nothing in a vault. An acknowledgement
+// ("answer single word ok.") is only these, so it is not a question and
+// prime serves nothing for it.
 PRIME_STOP :: [?]string {
 	"the", "and", "for", "with", "that", "this", "from", "what", "how", "can", "you", "your", "are",
 	"was", "were", "will", "would", "should", "could", "have", "has", "had", "not", "but", "all",
@@ -54,6 +56,7 @@ PRIME_STOP :: [?]string {
 	"new", "old", "first", "last", "next", "other", "each", "every", "much", "many", "very", "really",
 	"say", "says", "said", "list", "lists", "name", "names", "plan", "plans", "handle", "through",
 	"should", "mean", "means", "approach", "approaches", "kind", "sort", "part", "between",
+	"answer", "single", "word",
 }
 
 cmd_prime :: proc(cli: ^Cli, args: []string) -> int {
@@ -226,13 +229,17 @@ cmd_prime :: proc(cli: ^Cli, args: []string) -> int {
 }
 
 // prime_terms is what a prompt asks about: its words less the ones that
-// carry nothing, pasted text set aside, the first PRIME_TERMS kept.
+// carry nothing, pasted text set aside, the first PRIME_TERMS kept. A
+// sentence dot stays on a word (query_terms keeps dots, for handles), so
+// it is stripped before the stop list: "ok." is the stop word ok, and a
+// prompt of only those prints nothing.
 prime_terms :: proc(prompt: string) -> []string {
 	text := without_pasted(prompt)
 	terms := make([dynamic]string)
 	seen := make(map[string]bool)
 	stop := PRIME_STOP
-	outer: for t in query_terms(text) {
+	outer: for raw in query_terms(text) {
+		t := strings.trim_right(raw, ".")
 		if len(t) < 3 || seen[t] {
 			continue
 		}

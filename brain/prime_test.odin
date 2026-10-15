@@ -13,6 +13,102 @@ prime_terms_drop_noise_and_pasted_text :: proc(t: ^testing.T) {
 	terms := prime_terms("How do I rebuild the sqlite index? <pasted_content id=\"1\">\nlibgit2 everywhere\n</pasted_content id=\"1\"> please")
 	testing.expect_value(t, strings.join(terms, " "), "rebuild sqlite index")
 	testing.expect_value(t, len(prime_terms("do it now")), 0)
+	// A sentence dot is not part of the word: "ok." is the stop word ok.
+	testing.expect_value(t, len(prime_terms("do it now.")), 0)
+	testing.expect_value(t, len(prime_terms("ok.")), 0)
+	testing.expect_value(t, len(prime_terms("yes.")), 0)
+}
+
+// A prompt with nothing past the stop list prints nothing and logs no lookup.
+@(test)
+prime_prints_nothing_when_nothing_is_past_the_stop_list :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	_, _, code := exec(f.cli, "reindex")
+	testing.expect_value(t, code, 0)
+	f.cli.has_stdin = true
+	f.cli.stdin = `{"session_id":"s-quiet","hook_event_name":"UserPromptSubmit","prompt":"ok."}`
+	o := ""
+	o, _, code = exec(f.cli, "prime")
+	testing.expect_value(t, code, 0)
+	testing.expect_value(t, o, "")
+	testing.expect_value(t, count_int(t, f, "select count(*) from queries"), 0)
+}
+
+// A one-line acknowledgement is not a question. Bullets that merely share
+// its words, a fixed reply or a single-letter name, stay unserved, and
+// nothing is logged.
+@(test)
+prime_stays_quiet_on_an_acknowledgement :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	mem := path.join(f.vault, "AI", "MEMORY.md")
+	text, rerr := path.read(mem)
+	testing.expect_value(t, rerr, nil)
+	testing.expect_value(
+		t,
+		path.write(
+			mem,
+			strings.concatenate(
+				{
+					text,
+					"- **fixed reply fields** (aliases: trailer) — mandatory per-answer fields become a trailer ritual; word caps ignored — fixture — 2026-01-03\n",
+					"- **no single-letter names** (aliases: variable naming) — any single-letter name is at least a word — fixture — 2026-01-03\n",
+				},
+			),
+		),
+		nil,
+	)
+	_, _, code := exec(f.cli, "reindex")
+	testing.expect_value(t, code, 0)
+	f.cli.has_stdin = true
+	f.cli.stdin = `{"session_id":"s-ack","hook_event_name":"UserPromptSubmit","prompt":"answer single word ok."}`
+	o := ""
+	o, _, code = exec(f.cli, "prime")
+	testing.expect_value(t, code, 0)
+	testing.expect_value(t, o, "")
+	testing.expect_value(t, count_int(t, f, "select count(*) from queries"), 0)
+	testing.expect_value(t, strings.join(prime_terms("answer single word ok."), " "), "")
+}
+
+// Naming a handle still primes, acknowledgement words or not, and that
+// bullet is served once in the session. Another session is served again.
+@(test)
+prime_still_serves_a_named_handle_once_per_session :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	mem := path.join(f.vault, "AI", "MEMORY.md")
+	text, rerr := path.read(mem)
+	testing.expect_value(t, rerr, nil)
+	testing.expect_value(
+		t,
+		path.write(
+			mem,
+			strings.concatenate(
+				{
+					text,
+					"- **fixed reply fields** (aliases: trailer) — mandatory per-answer fields become a trailer ritual; word caps ignored — fixture — 2026-01-03\n",
+					"- **no single-letter names** (aliases: variable naming) — any single-letter name is at least a word — fixture — 2026-01-03\n",
+				},
+			),
+		),
+		nil,
+	)
+	f.cli.has_stdin = true
+	f.cli.stdin = `{"session_id":"s-real","hook_event_name":"UserPromptSubmit","prompt":"answer single word sqlite ok."}`
+	o, _, code := exec(f.cli, "prime")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "**sqlite**"), o)
+	testing.expect(t, !strings.contains(o, "fixed reply fields") && !strings.contains(o, "single-letter"), o)
+	o, _, code = exec(f.cli, "prime")
+	testing.expect_value(t, code, 0)
+	testing.expect_value(t, o, "")
+	f.cli.stdin = `{"session_id":"s-real-2","hook_event_name":"UserPromptSubmit","prompt":"answer single word sqlite ok."}`
+	o, _, _ = exec(f.cli, "prime")
+	testing.expect(t, strings.contains(o, "**sqlite**"), o)
 }
 
 // A prompt's bullets are served once per session: the second prompt on
