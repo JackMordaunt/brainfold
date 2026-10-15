@@ -508,6 +508,50 @@ pack_infers_the_project_from_the_working_directory :: proc(t: ^testing.T) {
 	testing.expect_value(t, scalar_text(db, "select q from queries order by id desc limit 1"), "pack fixture")
 }
 
+// A linked worktree's folder is not the repository. Its .git is a gitfile
+// pointing at the main checkout, and the pack takes that checkout's name.
+@(test)
+pack_infers_the_repository_from_a_linked_worktree :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	checkout := path.join(f.root, "sqlite")
+	wt := path.join(f.root, "agent-adbbb")
+	gitdir := path.join(checkout, ".git", "worktrees", "agent-adbbb")
+	testing.expect_value(t, path.mkdirs(gitdir), nil)
+	testing.expect_value(t, path.mkdirs(path.join(wt, "src")), nil)
+	gitfile := strings.concatenate({"gitdir: ", gitdir, "\n"})
+	testing.expect_value(t, path.write(path.join(wt, ".git"), gitfile), nil)
+	f.cli.env["PWD"] = path.join(wt, "src")
+	o, _, code := exec(f.cli, "pack")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.has_prefix(o, "# brain pack sqlite: "), "a pack for the checkout, not the worktree folder")
+	testing.expect(t, strings.contains(o, " **sqlite** — "), "the vault's bullets name the repository")
+	testing.expect(t, !strings.contains(o, "agent-adbbb"), "the worktree folder is not the project")
+	db, err := open_index(f.cli)
+	testing.expect_value(t, err, "")
+	defer sqlite3.close(&db)
+	testing.expect_value(t, scalar_text(db, "select q from queries order by id desc limit 1"), "pack sqlite")
+
+	// A gitdir relative to the worktree folder resolves the same way.
+	rel := path.join(f.root, "agent-rel")
+	testing.expect_value(t, path.mkdirs(path.join(rel, "src")), nil)
+	testing.expect_value(t, path.write(path.join(rel, ".git"), "gitdir: ../sqlite/.git/worktrees/agent-rel\n"), nil)
+	f.cli.env["PWD"] = path.join(rel, "src")
+	_, _, code = exec(f.cli, "pack")
+	testing.expect_value(t, code, 0)
+	testing.expect_value(t, scalar_text(db, "select q from queries order by id desc limit 1"), "pack sqlite")
+
+	// A gitfile that is not a worktree still names its own directory.
+	own := path.join(f.root, "fixture")
+	testing.expect_value(t, path.mkdirs(own), nil)
+	testing.expect_value(t, path.write(path.join(own, ".git"), strings.concatenate({"gitdir: ", path.join(checkout, ".git"), "\n"})), nil)
+	f.cli.env["PWD"] = own
+	_, _, code = exec(f.cli, "pack")
+	testing.expect_value(t, code, 0)
+	testing.expect_value(t, scalar_text(db, "select q from queries order by id desc limit 1"), "pack fixture")
+}
+
 // Under review before, a proposal is completed, queued in the inbox,
 // invisible to find until a person approves it into a core file, and gone
 // once dropped.

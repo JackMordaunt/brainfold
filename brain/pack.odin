@@ -122,7 +122,10 @@ cmd_pack :: proc(cli: ^Cli, args: []string) -> int {
 // repo_here is the repository the caller is in: the nearest directory, from
 // the working directory up, that holds a .git, else the working directory
 // itself; and its name. PWD is read first so a hook, or a test, can say
-// where it is.
+// where it is. A linked worktree's .git is a gitfile,
+// `gitdir: <checkout>/.git/worktrees/<id>`; the name is the checkout's,
+// which is what the vault's bullets use. The directory returned is still
+// the one that holds that .git.
 repo_here :: proc(cli: ^Cli) -> (root, name: string) {
 	cwd := getenv(cli, "PWD")
 	if cwd == "" {
@@ -131,8 +134,9 @@ repo_here :: proc(cli: ^Cli) -> (root, name: string) {
 	start, _ := path.clean(cwd)
 	d := start
 	for {
-		if os.exists(path.join(d, ".git")) {
-			return d, path.base(d)
+		git := path.join(d, ".git")
+		if os.exists(git) {
+			return d, repo_name(d, git)
 		}
 		parent := path.dir(d)
 		if parent == d || parent == "" {
@@ -141,6 +145,67 @@ repo_here :: proc(cli: ^Cli) -> (root, name: string) {
 		d = parent
 	}
 	return start, path.base(start)
+}
+
+// repo_name is the directory's own name, unless git is a linked-worktree
+// gitfile. That file points at <checkout>/.git/worktrees/<id>, absolute or
+// relative to dir, and the vault names the checkout, not the worktree folder.
+repo_name :: proc(dir, git: string) -> string {
+	if !os.is_file(git) {
+		return path.base(dir)
+	}
+	text, err := path.read(git)
+	if err != nil {
+		return path.base(dir)
+	}
+	checkout, ok := checkout_in_gitfile(dir, text)
+	if !ok {
+		return path.base(dir)
+	}
+	return path.base(checkout)
+}
+
+// checkout_in_gitfile reads a gitfile. A linked worktree's gitdir has
+// `.git` followed by `worktrees`; the checkout is the directory holding
+// that `.git`. A submodule or a separate git dir is not one.
+checkout_in_gitfile :: proc(dir, text: string) -> (checkout: string, ok: bool) {
+	line := text
+	if i := strings.index(line, "\n"); i >= 0 {
+		line = line[:i]
+	}
+	line = strings.trim_space(line)
+	if !strings.has_prefix(line, "gitdir:") {
+		return
+	}
+	gitdir := strings.trim_space(line[len("gitdir:"):])
+	if gitdir == "" {
+		return
+	}
+	if path.is_abs(gitdir) {
+		gitdir, _ = path.clean(gitdir)
+	} else {
+		gitdir = path.join(dir, gitdir)
+	}
+	d := gitdir
+	for {
+		if path.base(d) == "worktrees" {
+			common := path.dir(d)
+			if path.base(common) != ".git" {
+				return
+			}
+			found := path.dir(common)
+			base := path.base(found)
+			if found == "" || found == common || base == "" || base == "." {
+				return
+			}
+			return found, true
+		}
+		parent := path.dir(d)
+		if parent == d || parent == "" {
+			return
+		}
+		d = parent
+	}
 }
 
 // Pack is what a project's briefing holds: its bullets in order, within the
