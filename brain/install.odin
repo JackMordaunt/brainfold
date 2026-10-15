@@ -162,7 +162,7 @@ block_remove :: proc(cli: ^Cli, file, tag: string) {
 
 // In .bashrc the block must sit above the interactive early-return, or shells
 // that source the file non-interactively never reach it.
-rc_block :: proc(cli: ^Cli, rc, body, tag: string) {
+rc_block :: proc(cli: ^Cli, rc, body, tag: string, by := "brain install") {
 	GUARD :: "[[ $- != *i* ]] && return"
 	text, exists := read_text(rc)
 	if exists && strings.contains(text, GUARD) && !strings.contains(text, strings.concatenate({"brain:", tag, " >>>"})) {
@@ -175,7 +175,7 @@ rc_block :: proc(cli: ^Cli, rc, body, tag: string) {
 		done := false
 		for l in strings.split_lines(text) {
 			if !done && strings.has_prefix(l, GUARD) {
-				append(&lines, block_begin("#", tag, ""), body, block_end("#", tag, ""), "")
+				append(&lines, block_begin("#", tag, "", by), body, block_end("#", tag, ""), "")
 				done = true
 			}
 			append(&lines, l)
@@ -183,7 +183,7 @@ rc_block :: proc(cli: ^Cli, rc, body, tag: string) {
 		path.write(rc, strings.join(lines[:], "\n"))
 		return
 	}
-	block_apply(cli, rc, tag, "#", "", body)
+	block_apply(cli, rc, tag, "#", "", body, by)
 }
 
 // posix_path is the form a PATH entry takes in a file Git Bash reads: on

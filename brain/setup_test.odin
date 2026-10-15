@@ -69,6 +69,8 @@ setup_says_what_is_left_and_sees_it_done :: proc(t: ^testing.T) {
 	testing.expect(t, installed && !hooks && !reading, "Claude Code is here, not connected")
 	installed, _, _ = agent_state(s, "pi")
 	testing.expect(t, !installed, "no pi here")
+	installed, _, _ = agent_state(s, "grok")
+	testing.expect(t, !installed, "no grok here")
 	testing.expect_value(t, s.memories.new, 1)
 	testing.expect_value(t, s.lookups, 0)
 
@@ -98,7 +100,7 @@ setup_answers_with_no_vault :: proc(t: ^testing.T) {
 	testing.expect(t, !s.vault.exists)
 	testing.expect_value(t, s.lookups, 0)
 	// What does not need a vault is still said: the agents brain serves.
-	testing.expect_value(t, len(s.agents), 2)
+	testing.expect_value(t, len(s.agents), 3)
 }
 
 // A new vault goes only into an empty folder, made when it is missing.

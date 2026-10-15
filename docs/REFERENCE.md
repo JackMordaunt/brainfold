@@ -128,8 +128,10 @@ is signed in with; an ssh remote uses ssh and its agent.
 
 ## The hooks
 
-`brain install` registers three hooks in Claude Code (`~/.claude/settings.json`)
-and pi (one extension file):
+`brain install` registers three hooks in Claude Code (`~/.claude/settings.json`),
+pi (one extension file) and Grok (`$GROK_HOME/hooks` plus a `grok` shell
+function; Grok does not take hook stdout as context, so the function passes
+the pack with `grok --rules` and a Stop block carries prime):
 
 - **pack** at session start: the bullets about the repository you are in.
 - **prime** on every prompt: the bullets and note lines that hold enough of

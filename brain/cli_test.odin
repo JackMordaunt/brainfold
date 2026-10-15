@@ -53,6 +53,8 @@ fixture_cli :: proc(f: Fixture) -> ^Cli {
 	env["CODEX_SANDBOX_NETWORK_DISABLED"] = ""
 	env["CLAUDE_CODE_SESSION_ID"] = ""
 	env["BRAIN_TOOL"] = ""
+	env["GROK_HOME"] = ""
+	env["PI_HOME"] = ""
 	env["LC_ALL"] = "C"
 	env["LC_MESSAGES"] = "C"
 	env["LANG"] = "C"

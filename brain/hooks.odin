@@ -3,8 +3,8 @@ package brain
 import "core:os"
 import "core:strings"
 
-// A harness is a program that runs an agent: Claude Code, pi, and the
-// next one. Each has its own way to be told to run brain at a session's
+// A harness is a program that runs an agent: Claude Code, pi and Grok.
+// Each has its own way to be told to run brain at a session's
 // start, before a prompt and when the agent would stop, and its own shape
 // for what it hands over and what it takes back. Everything brain does
 // with those moments is one of three commands that know no harness:
@@ -51,7 +51,7 @@ Harness :: struct {
 	status:      proc(cli: ^Cli) -> []Hook_Registration,
 }
 
-HARNESSES :: [2]Harness {
+HARNESSES :: [3]Harness {
 	{
 		name = "claude",
 		transcripts = "claude",
@@ -71,6 +71,16 @@ HARNESSES :: [2]Harness {
 		register = pi_register,
 		unregister = pi_unregister,
 		status = pi_status,
+	},
+	{
+		name = "grok",
+		transcripts = "grok",
+		detect = grok_detect,
+		parse = grok_parse,
+		reply = grok_reply,
+		register = grok_register,
+		unregister = grok_unregister,
+		status = grok_status,
 	},
 }
 
@@ -208,7 +218,7 @@ wants_stdin :: proc(args: []string) -> bool {
 // turns them on or off; --harness names one, else every harness here.
 // On needs this binary's own path, the way install writes it.
 cmd_hooks :: proc(cli: ^Cli, args: []string) -> int {
-	usage := "usage: brain hooks [on|off] [--harness claude|pi]"
+	usage := "usage: brain hooks [on|off] [--harness claude|pi|grok]"
 	action, only := "", ""
 	rest := args
 	for len(rest) > 0 {

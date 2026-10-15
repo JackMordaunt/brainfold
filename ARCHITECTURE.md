@@ -327,6 +327,16 @@ the same table.
   the transcript keeps and does not display, and settle's reason comes
   back as `{"reason":...}`, which the extension appends with
   `continue: true`. pi hands nothing over on stdin.
+- **Grok** (`brain/harness_grok.odin`) is registered by writing
+  `$GROK_HOME/hooks/brain.json` and `brain.sh`, and a `grok` function in
+  the shell rc. Grok 1.0.52 runs those hooks, and what they print is not
+  model context; `$GROK_HOME/rules` is read before any hook. The function
+  runs `brain pack` and execs `grok --rules` with that text, which the
+  session does see. `user_prompt_submit` records `brain prime`, and a
+  Stop whose reason is `end_turn` continues with
+  `{"decision":"block","reason":...}` holding that text. A later Stop
+  runs `brain settle`. The transcript is `updates.jsonl`, which no recall
+  adapter reads, so settle stays quiet.
 
 Adding a harness is one file: a detect, a register and unregister, a
 status, a parse when the program speaks on stdin, and a reply.

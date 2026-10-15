@@ -6,6 +6,7 @@ import "core:strings"
 import "core:testing"
 
 import "jm:path"
+import "jm:sh"
 
 @(test)
 prime_terms_drop_noise_and_pasted_text :: proc(t: ^testing.T) {
@@ -351,4 +352,222 @@ pi_transcript :: proc(turns: int, work, propose: bool) -> string {
 		strings.write_string(&b, "]}}\n")
 	}
 	return strings.to_string(b)
+}
+
+// Grok is present when its home directory is. Hooks register under it, and a
+// shell function in the rc file is what puts the pack on the command line.
+@(test)
+grok_harness_registers_the_shell_function_and_the_hooks :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	f.cli.env["BRAIN_EXE"] = "/opt/brain"
+	testing.expect_value(t, path.mkdirs(path.join(f.home, ".grok")), nil)
+
+	o, _, code := exec(f.cli, "hooks")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "grok    SessionStart       brain pack    off\n"), o)
+	testing.expect(t, strings.contains(o, "grok    UserPromptSubmit   brain prime   off\n"), o)
+	testing.expect(t, strings.contains(o, "grok    Stop               brain settle  off\n"), o)
+
+	o, _, code = exec(f.cli, "hooks", "on", "--harness", "grok")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "grok    Stop               brain settle  on\n"), o)
+
+	script := path.join(f.home, ".grok", "hooks", "brain.sh")
+	text, rerr := path.read(script)
+	testing.expect_value(t, rerr, nil)
+	testing.expect(t, strings.has_prefix(text, "# brainfold hooks:"), text)
+	testing.expect(t, strings.contains(text, "'/opt/brain'"), text)
+	testing.expect(t, strings.contains(text, "user_prompt_submit") && strings.contains(text, "session_start"), text)
+	testing.expect(t, strings.contains(text, "prime") && strings.contains(text, "--harness") && strings.contains(text, "grok"), text)
+	testing.expect(t, strings.contains(text, "end_turn") && strings.contains(text, `"decision":"block"`), text)
+
+	hooks, _ := path.read(path.join(f.home, ".grok", "hooks", "brain.json"))
+	testing.expect(t, strings.contains(hooks, "SessionStart") && strings.contains(hooks, "UserPromptSubmit"), hooks)
+	testing.expect(t, strings.contains(hooks, "Stop") && strings.contains(hooks, "SessionEnd"), hooks)
+	testing.expect(t, strings.contains(hooks, "brain.sh") && strings.contains(hooks, `"timeout":10`) && strings.contains(hooks, `"timeout":30`), hooks)
+	testing.expect(t, !strings.contains(hooks, "startup|clear|compact"), hooks)
+
+	rc, _ := path.read(path.join(f.home, ".bashrc"))
+	testing.expect(t, strings.contains(rc, "brain:grok >>>") && strings.contains(rc, "brain hooks on"), rc)
+	testing.expect(t, strings.contains(rc, "command grok --rules") && strings.contains(rc, "'/opt/brain'"), rc)
+	testing.expect(t, strings.contains(rc, "--cwd") && strings.contains(rc, "version"), rc)
+
+	o, _, _ = exec(f.cli, "hooks", "--json", "--harness", "grok")
+	testing.expect_value(t, o, `{"grok":{"pack":true,"prime":true,"settle":true}}` + "\n")
+
+	o, _, code = exec(f.cli, "hooks", "on", "--harness", "grok")
+	testing.expect_value(t, code, 0)
+	rc2, _ := path.read(path.join(f.home, ".bashrc"))
+	testing.expect_value(t, rc2, rc)
+
+	o, _, code = exec(f.cli, "hooks", "off", "--harness", "grok")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, !os.exists(script), "the hook script is gone")
+	testing.expect(t, !os.exists(path.join(f.home, ".grok", "hooks", "brain.json")), "the hook file is gone")
+	rc3, _ := path.read(path.join(f.home, ".bashrc"))
+	testing.expect(t, !strings.contains(rc3, "brain:grok"), rc3)
+	testing.expect(t, strings.contains(o, "grok    SessionStart       brain pack    off\n"), o)
+}
+
+// A prompt's bullet is read from Grok's own JSON, held until Stop, and handed
+// back as the decision Grok feeds the model. Settle has nothing to read.
+@(test)
+grok_harness_primes_on_stop_and_packs_before_start :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	f.cli.has_stdin = true
+	f.cli.stdin = `{"hookEventName":"user_prompt_submit","sessionId":"g-1","prompt":"why does the sqlite index need fts5?"}`
+	o, _, code := exec(f.cli, "prime", "--harness", "grok")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "**sqlite**"), o)
+	testing.expect_value(t, last_query_row(t, f), "1 grok g-1")
+	o, _, _ = exec(f.cli, "prime", "--harness", "grok")
+	testing.expect_value(t, o, "")
+
+	f.cli.stdin = `{"hook_event_name":"UserPromptSubmit","session_id":"g-2","prompt":"sqlite fts5","stop_hook_active":false}`
+	o, _, code = exec(f.cli, "prime", "--harness", "grok")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.contains(o, "**sqlite**"), o)
+	testing.expect_value(t, last_query_row(t, f), "1 grok g-2")
+
+	ev, ok := grok_parse(`{"hookEventName":"stop","sessionId":"g","transcriptPath":"/t","stopHookActive":true,"prompt":"hi"}`)
+	testing.expect(t, ok && ev.continuing, "camelCase stop is Grok's")
+	testing.expect_value(t, ev.session, "g")
+	testing.expect_value(t, ev.transcript, "/t")
+	testing.expect_value(t, ev.prompt, "hi")
+
+	// No recall adapter reads updates.jsonl, so settle stays quiet even when
+	// the file is a transcript another harness would ask about.
+	file := path.join(f.root, "t.jsonl")
+	testing.expect_value(t, path.write(file, settle_transcript(8, true, false)), nil)
+	f.cli.has_stdin = false
+	o, _, code = exec(f.cli, "settle", "--harness", "grok", "--session", "g-1", "--transcript", file)
+	testing.expect_value(t, code, 0)
+	testing.expect_value(t, o, "")
+
+	if _, found := sh.which("sh"); !found {
+		return
+	}
+	bin := path.join(f.root, "bin")
+	testing.expect_value(t, path.mkdirs(bin), nil)
+	stub := path.join(bin, "brain")
+	fake := path.join(bin, "grok")
+	calls := path.join(f.root, "calls")
+	pwds := path.join(f.root, "pwds")
+	seen := path.join(f.root, "stdin")
+	arg1 := path.join(f.root, "arg1")
+	arg2 := path.join(f.root, "arg2")
+	argc := path.join(f.root, "argc")
+	mode := os.Permissions_Read_All + os.Permissions_Execute_All + {.Write_User}
+	testing.expect_value(t, path.write(stub, strings.concatenate({
+		"#!/bin/sh\n",
+		"printf '%s %s %s\\n' \"$1\" \"$BRAIN_CALLER\" \"$BRAIN_SESSION\" >> \"", calls, "\"\n",
+		"printf '%s\\n' \"$PWD\" >> \"", pwds, "\"\n",
+		"case \"$1\" in\n",
+		"  prime) cat > \"", seen, "\"; printf '%s\\n' 'bullet \"sqlite\"' ;;\n",
+		"  pack) printf '%s\\n' 'pack body' ;;\n",
+		"  settle) printf '%s\\n' '{\"decision\":\"block\",\"reason\":\"propose\"}' ;;\n",
+		"esac\n",
+		"exit 0\n",
+	})), nil)
+	testing.expect_value(t, path.write(fake, strings.concatenate({
+		"#!/bin/sh\n",
+		"printf '%s\\n' \"$1\" > \"", arg1, "\"\n",
+		"printf '%s\\n' \"$2\" > \"", arg2, "\"\n",
+		"printf '%s\\n' \"$#\" > \"", argc, "\"\n",
+		"exit 0\n",
+	})), nil)
+	testing.expect_value(t, os.change_mode(stub, mode), nil)
+	testing.expect_value(t, os.change_mode(fake, mode), nil)
+
+	f.cli.env["BRAIN_EXE"] = stub
+	testing.expect_value(t, path.mkdirs(path.join(f.home, ".grok")), nil)
+	_, _, code = exec(f.cli, "hooks", "on", "--harness", "grok")
+	testing.expect_value(t, code, 0)
+	script := path.join(f.home, ".grok", "hooks", "brain.sh")
+
+	prompt := `{"prompt":"why sqlite"}`
+	r := sh.exec(
+		{"/bin/sh", script},
+		{
+			env = {"PATH=/usr/bin:/bin", "GROK_HOOK_EVENT=user_prompt_submit", "GROK_SESSION_ID=s1"},
+			stdin = prompt,
+		},
+	)
+	testing.expect(t, r.ok, sh.error(r))
+	testing.expect_value(t, r.stdout, "")
+	got, _ := path.read(seen)
+	testing.expect_value(t, got, prompt)
+	logged, _ := path.read(calls)
+	testing.expect(t, strings.contains(logged, "prime grok s1"), logged)
+	pending := path.join(f.home, ".grok", "brain-pending", "s1")
+	held, _ := path.read(pending)
+	testing.expect(t, strings.contains(held, `bullet "sqlite"`), held)
+
+	stop := `{"reason":"end_turn","transcript_path":"/tmp/updates.jsonl","stopHookActive":false}`
+	r = sh.exec(
+		{"/bin/sh", script},
+		{env = {"PATH=/usr/bin:/bin", "GROK_HOOK_EVENT=stop", "GROK_SESSION_ID=s1"}, stdin = stop},
+	)
+	testing.expect(t, r.ok, sh.error(r))
+	v, jerr := json.parse_string(strings.trim_space(r.stdout))
+	testing.expect_value(t, jerr, nil)
+	testing.expect_value(t, json_string(v, "decision"), "block")
+	testing.expect(t, strings.contains(json_string(v, "reason"), `bullet "sqlite"`), r.stdout)
+	testing.expect(t, !os.exists(pending), "the bullet is delivered once")
+
+	os.remove(calls)
+	r = sh.exec(
+		{"/bin/sh", script},
+		{env = {"PATH=/usr/bin:/bin", "GROK_HOOK_EVENT=stop", "GROK_SESSION_ID=s1"}, stdin = stop},
+	)
+	testing.expect(t, r.ok, sh.error(r))
+	testing.expect(t, strings.contains(r.stdout, `"reason":"propose"`), r.stdout)
+	logged, _ = path.read(calls)
+	testing.expect(t, strings.contains(logged, "settle grok s1"), logged)
+
+	os.remove(calls)
+	r = sh.exec(
+		{"/bin/sh", script},
+		{env = {"PATH=/usr/bin:/bin", "GROK_HOOK_EVENT=stop", "GROK_SESSION_ID=s1"}, stdin = `{"reason":"shutdown"}`},
+	)
+	testing.expect(t, r.ok, sh.error(r))
+	testing.expect_value(t, r.stdout, "")
+	testing.expect(t, !os.exists(calls), "a shutdown stop is not a turn")
+
+	if _, found := sh.which("bash"); !found {
+		return
+	}
+	os.remove(calls)
+	os.remove(arg1)
+	rc := path.join(f.home, ".bashrc")
+	shell_env := []string{strings.concatenate({"PATH=", bin, ":/usr/bin:/bin"}), strings.concatenate({"HOME=", f.home})}
+	r = sh.exec(
+		{"/bin/bash", "-c", `source "$1"; grok version`, "bash", rc},
+		{env = shell_env},
+	)
+	testing.expect(t, r.ok, sh.error(r))
+	testing.expect(t, !os.exists(calls), "version is not a session")
+	a1, _ := path.read(arg1)
+	testing.expect_value(t, strings.trim_space(a1), "version")
+
+	os.remove(pwds)
+	elsewhere := path.join(f.root, "elsewhere")
+	testing.expect_value(t, path.mkdirs(elsewhere), nil)
+	r = sh.exec(
+		{"/bin/bash", "-c", `source "$1"; grok --cwd "$2" -p hello`, "bash", rc, elsewhere},
+		{env = shell_env},
+	)
+	testing.expect(t, r.ok, sh.error(r))
+	a1, _ = path.read(arg1)
+	a2, _ := path.read(arg2)
+	n, _ := path.read(argc)
+	testing.expect_value(t, strings.trim_space(a1), "--rules")
+	testing.expect_value(t, strings.trim_space(a2), "pack body")
+	testing.expect_value(t, strings.trim_space(n), "6")
+	pwd, _ := path.read(pwds)
+	testing.expect(t, strings.contains(pwd, elsewhere), pwd)
 }
