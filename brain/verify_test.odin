@@ -214,8 +214,8 @@ help_lists :: proc(listed: []string, name: string) -> bool {
 	return false
 }
 
-// The prompt the correction answers was primed by name. A later find and
-// the pack logged beside that prime are other serves, not that prompt.
+// The prompt the correction answers was primed the way prime logs it.
+// A later find and the pack logged beside that prime are other serves.
 @(test)
 doctor_joins_a_correction_to_the_prompt_it_follows :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
@@ -224,10 +224,12 @@ doctor_joins_a_correction_to_the_prompt_it_follows :: proc(t: ^testing.T) {
 	exec(f.cli, "recall", "--enable", "fixture")
 	exec(f.cli, "recall", "--sync")
 	exec(f.cli, "reindex")
-	prompt := "prime the playhead jumps to the frame you clicked when scrubbing"
+	// What prime writes: "prime " plus the prompt's terms, not the raw turn.
+	logged := strings.concatenate({"prime ", strings.join(prime_terms("the playhead jumps to the frame you clicked when scrubbing"), " ")})
+	testing.expect_value(t, logged, "prime playhead jumps frame clicked scrubbing")
 	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
-	sqlite3.exec_args(db, "insert into queries(id,ts,q,hits,caller,session) values(6,'2026-01-01 10:00:01',?,2,'claude','sess-one')", prompt)
+	sqlite3.exec_args(db, "insert into queries(id,ts,q,hits,caller,session) values(6,'2026-01-01 10:00:01',?,2,'claude','sess-one')", logged)
 	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(6,'AI/MEMORY.md','fixture tool',1)")
 	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(6,'AI/MEMORY.md','playhead seam',2)")
 	sqlite3.exec(db, "insert into queries(id,ts,q,hits,caller,session) values(7,'2026-01-01 10:01:30','filmstrip',1,'claude','sess-one')")

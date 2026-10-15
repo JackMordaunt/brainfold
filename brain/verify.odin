@@ -461,10 +461,11 @@ Suspect :: struct {
 
 SUSPECT_TURNS :: 10 // turns between the serve and the correction, at most
 
-// served_prompt is the query a correction follows. The prime of the user
-// prompt it answers wins; otherwise the latest lookup after that prompt
-// that is not a pack. A pack's hits share a timestamp with whatever was
-// served next, and rank is not the join.
+// served_prompt is the query a correction follows. Prime logs "prime "
+// plus the prompt's terms, lowercased the way prime_terms does, and that
+// row wins over a later find and over a pack at the same timestamp.
+// With no such prime, the latest non-pack lookup at or after the prompt
+// is the serve. Rank is not the join.
 served_prompt :: proc(db, rc: sqlite3.Db, session, correction_ts: string) -> (query_id: i64, served: string, ok: bool) {
 	if session == "" || correction_ts == "" {
 		return
@@ -485,7 +486,11 @@ served_prompt :: proc(db, rc: sqlite3.Db, session, correction_ts: string) -> (qu
 	prompt_ts := strings.clone(sqlite3.text(pst, 0))
 	prompt := strings.clone(sqlite3.text(pst, 1))
 	sqlite3.finish(&pst)
-	prime := strings.concatenate({"prime ", prompt})
+	// The same string cmd_prime writes. Empty terms mean prime logged nothing.
+	prime := ""
+	if terms := prime_terms(prompt); len(terms) > 0 {
+		prime = strings.concatenate({"prime ", strings.join(terms, " ")})
+	}
 	from := log_time(prompt_ts)
 	stmt, qerr := sqlite3.query(
 		db,
@@ -508,7 +513,7 @@ served_prompt :: proc(db, rc: sqlite3.Db, session, correction_ts: string) -> (qu
 			break
 		}
 		q := sqlite3.text(stmt, 2)
-		if q == prompt || q == prime {
+		if prime != "" && q == prime {
 			return sqlite3.integer(stmt, 0), strings.clone(ts), true
 		}
 		if fallback_ts == "" && ts >= from {

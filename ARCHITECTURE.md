@@ -225,11 +225,11 @@ and commits no local repository held.
 
 Doctor gained two reads on top of its sections: the claims that failed
 the last verify; and `suspect`, the bullets served for the prompt a
-correction follows, within ten turns. The join is that prompt — the prime
-of what the person said, else the latest lookup after it — and not every
-rank-3 hit of a pack that shares the serve's timestamp. A third,
-`contradictions` (two core bullets answering to one name and sharing no
-content word), was dropped on 2026-10-08: it found names two unrelated
+correction follows, within ten turns. The join is that prompt's prime,
+logged as "prime" plus its terms, else the latest non-pack lookup after
+it — not every rank-3 hit of a pack that shares the serve's timestamp.
+A third, `contradictions` (two core bullets answering to one name and
+sharing no content word), was dropped on 2026-10-08: it found names two unrelated
 bullets share, which is no fault and wants no action.
 
 ## Reinforcement
