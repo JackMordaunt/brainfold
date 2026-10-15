@@ -95,15 +95,24 @@ doctor_names_bullets_served_before_a_correction :: proc(t: ^testing.T) {
 	exec(f.cli, "recall", "--enable", "fixture")
 	exec(f.cli, "recall", "--sync")
 	exec(f.cli, "reindex")
-	// A serve in the fixture session, logged a minute before its correction.
+	// The serve a minute before the correction, plus an earlier rank-1 hit
+	// still inside ten turns and a pack that shares the serve's timestamp.
+	// Those are not the prompt the correction follows.
 	db, err := open_index(f.cli)
 	testing.expect_value(t, err, "")
+	sqlite3.exec(db, "insert into queries(id,ts,q,hits,caller,session) values(6,'2026-01-01 10:00:10','earlier lookup',1,'claude','sess-one')")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(6,'AI/MEMORY.md','reply style',1)")
 	sqlite3.exec(db, "insert into queries(id,ts,q,hits,caller,session) values(7,'2026-01-01 10:01:30','filmstrip',1,'claude','sess-one')")
 	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(7,'AI/MEMORY.md','fixture tool',1)")
+	sqlite3.exec(db, "insert into queries(id,ts,q,hits,caller,session) values(8,'2026-01-01 10:01:30','pack omacut',3,'claude','sess-one')")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(8,'AI/MEMORY.md','fixed reply fields',1)")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(8,'AI/MEMORY.md','hook binary',2)")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(8,'AI/MEMORY.md','verify and learn',3)")
 	sqlite3.close(&db)
 	o, _, code := exec(f.cli, "doctor")
 	testing.expect_value(t, code, 0)
 	testing.expect(t, strings.contains(o, "AI/MEMORY.md **fixture tool** served 2026-01-01 10:01:30, then: No, don't move the filmstrip"), o)
+	testing.expect(t, !strings.contains(o, "reply style") && !strings.contains(o, "fixed reply fields") && !strings.contains(o, "hook binary") && !strings.contains(o, "verify and learn"), o)
 	o, _, _ = exec(f.cli, "doctor", "--json")
 	v, jerr := json.parse_string(o)
 	testing.expect_value(t, jerr, nil)
@@ -203,4 +212,42 @@ help_lists :: proc(listed: []string, name: string) -> bool {
 		}
 	}
 	return false
+}
+
+// The prompt the correction answers was primed by name. A later find and
+// the pack logged beside that prime are other serves, not that prompt.
+@(test)
+doctor_joins_a_correction_to_the_prompt_it_follows :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := recall_fixture(t)
+	defer fixture_destroy(f)
+	exec(f.cli, "recall", "--enable", "fixture")
+	exec(f.cli, "recall", "--sync")
+	exec(f.cli, "reindex")
+	prompt := "prime the playhead jumps to the frame you clicked when scrubbing"
+	db, err := open_index(f.cli)
+	testing.expect_value(t, err, "")
+	sqlite3.exec_args(db, "insert into queries(id,ts,q,hits,caller,session) values(6,'2026-01-01 10:00:01',?,2,'claude','sess-one')", prompt)
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(6,'AI/MEMORY.md','fixture tool',1)")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(6,'AI/MEMORY.md','playhead seam',2)")
+	sqlite3.exec(db, "insert into queries(id,ts,q,hits,caller,session) values(7,'2026-01-01 10:01:30','filmstrip',1,'claude','sess-one')")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(7,'AI/MEMORY.md','reply style',1)")
+	sqlite3.exec(db, "insert into queries(id,ts,q,hits,caller,session) values(8,'2026-01-01 10:00:01','pack omacut',3,'claude','sess-one')")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(8,'AI/MEMORY.md','fixed reply fields',1)")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(8,'AI/MEMORY.md','hook binary',2)")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(8,'AI/MEMORY.md','verify and learn',3)")
+	sqlite3.close(&db)
+	o, _, code := exec(f.cli, "doctor", "--json")
+	testing.expect_value(t, code, 0)
+	v, jerr := json.parse_string(o)
+	testing.expect_value(t, jerr, nil)
+	suspect, _ := v.(json.Object)["suspect"].(json.Array)
+	got := make(map[string]bool)
+	for s in suspect {
+		got[json_string(s, "handle")] = true
+		testing.expect_value(t, json_string(s, "served"), "2026-01-01 10:00:01")
+	}
+	testing.expect_value(t, len(suspect), 2)
+	testing.expect(t, got["fixture tool"] && got["playhead seam"], o)
+	testing.expect(t, !got["reply style"] && !got["fixed reply fields"] && !got["hook binary"] && !got["verify and learn"], o)
 }

@@ -10,10 +10,11 @@ import "jm:sqlite3"
 
 // The find log says what was served; nothing says whether it helped.
 // Learn reads both logs back as reinforcement. A serve was used when the
-// session stopped searching for those terms, no correction followed
-// within ten turns, and, the strong form, the agent went on to name the
-// handle. A query term that led to a used bullet and is not among its
-// names is wired to it as an alias once three sessions agree. Every
+// session stopped searching for those terms, no correction follows the
+// prompt that serve answered, and, the strong form, the agent went on to
+// name the handle. A pack or a later find in the same ten turns is not
+// that prompt. A query term that led to a used bullet and is not among
+// its names is wired to it as an alias once three sessions agree. Every
 // weight stays text: an alias is a word in the bullet, a boost is a
 // number read off a log, and both are reversed by an edit.
 
@@ -174,19 +175,18 @@ learn_outcomes :: proc(cli: ^Cli, db: sqlite3.Db) -> []Serve_Outcome {
 	defer if have_rc {
 		sqlite3.close(&rc)
 	}
-	// Corrections by session, read once.
-	corrections := make(map[string][dynamic]string) // session -> correction ts
+	// A correction marks the query that served the prompt it follows, and
+	// no other serve in the session.
+	corrected := make(map[i64]bool)
 	if have_rc {
 		for m in lesson_moments(rc, 0, "", "") {
-			if m.kind != "correction" {
+			if m.kind != "correction" || m.session == "" {
 				continue
 			}
-			list, has := corrections[m.session]
-			if !has {
-				list = make([dynamic]string)
+			qid, _, ok := served_prompt(db, rc, m.session, m.ts)
+			if ok {
+				corrected[qid] = true
 			}
-			append(&list, m.ts)
-			corrections[m.session] = list
 		}
 	}
 
@@ -202,28 +202,18 @@ learn_outcomes :: proc(cli: ^Cli, db: sqlite3.Db) -> []Serve_Outcome {
 				}
 			}
 		}
+		if o.used && corrected[s.query_id] {
+			o.used = false
+		}
 		if o.used && have_rc {
-			if list, has := corrections[s.session]; has {
-				for cts in list {
-					if cts <= turn_time(s.ts) {
-						continue
-					}
-					between := scalar_int(rc, "select count(*) from turn where session=? and ts > ? and ts <= ?", s.session, turn_time(s.ts), cts)
-					if between <= SUSPECT_TURNS {
-						o.used = false
-					}
-				}
-			}
-			if o.used {
-				n := scalar_int(
-					rc,
-					"select count(*) from turn where session=? and role='assistant' and ts > ? and instr(lower(body), ?) > 0",
-					s.session,
-					turn_time(s.ts),
-					strings.to_lower(s.handle),
-				)
-				o.strong = n > 0
-			}
+			n := scalar_int(
+				rc,
+				"select count(*) from turn where session=? and role='assistant' and ts > ? and instr(lower(body), ?) > 0",
+				s.session,
+				turn_time(s.ts),
+				strings.to_lower(s.handle),
+			)
+			o.strong = n > 0
 		}
 		append(&outcomes, o)
 	}

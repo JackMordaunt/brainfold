@@ -62,6 +62,52 @@ learn_wires_query_words_to_the_bullets_they_found :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(o, "**sqlite**"), o)
 }
 
+// A correction fills serve_outcome for the bullets the prompt it follows
+// served. A later find and a pack logged at the same time stay used.
+@(test)
+learn_records_the_correction_on_the_prompt_it_follows :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	f := recall_fixture(t)
+	defer fixture_destroy(f)
+	exec(f.cli, "recall", "--enable", "fixture")
+	exec(f.cli, "recall", "--sync")
+	exec(f.cli, "reindex")
+	prompt := "prime the playhead jumps to the frame you clicked when scrubbing"
+	db, err := open_index(f.cli)
+	testing.expect_value(t, err, "")
+	sqlite3.exec_args(db, "insert into queries(id,ts,q,hits,caller,session) values(6,'2026-01-01 10:00:01',?,2,'claude','sess-one')", prompt)
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(6,'AI/MEMORY.md','fixture tool',1)")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(6,'AI/MEMORY.md','playhead seam',2)")
+	sqlite3.exec(db, "insert into queries(id,ts,q,hits,caller,session) values(7,'2026-01-01 10:01:30','filmstrip',1,'claude','sess-one')")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(7,'AI/MEMORY.md','reply style',1)")
+	sqlite3.exec(db, "insert into queries(id,ts,q,hits,caller,session) values(8,'2026-01-01 10:00:01','pack omacut',3,'claude','sess-one')")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(8,'AI/MEMORY.md','fixed reply fields',1)")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(8,'AI/MEMORY.md','hook binary',2)")
+	sqlite3.exec(db, "insert into query_hits(query_id,file,handle,rank) values(8,'AI/MEMORY.md','verify and learn',3)")
+	sqlite3.close(&db)
+
+	o, _, code := exec(f.cli, "learn")
+	testing.expect_value(t, code, 0)
+	testing.expect(t, strings.has_prefix(o, "6 serves with a session: 4 used, 0 named back by the agent\n"), o)
+
+	db, err = open_index(f.cli)
+	testing.expect_value(t, err, "")
+	defer sqlite3.close(&db)
+	unused := proc(db: sqlite3.Db, handle: string) -> int {
+		return scalar_int(db, "select count(*) from serve_outcome where handle=? and used=0", handle)
+	}
+	used := proc(db: sqlite3.Db, handle: string) -> int {
+		return scalar_int(db, "select count(*) from serve_outcome where handle=? and used=1", handle)
+	}
+	testing.expect_value(t, unused(db, "fixture tool"), 1)
+	testing.expect_value(t, unused(db, "playhead seam"), 1)
+	testing.expect_value(t, used(db, "reply style"), 1)
+	testing.expect_value(t, used(db, "fixed reply fields"), 1)
+	testing.expect_value(t, used(db, "hook binary"), 1)
+	testing.expect_value(t, used(db, "verify and learn"), 1)
+	testing.expect_value(t, scalar_int(db, "select count(*) from serve_outcome where query_id=? and used=0", i64(8)), 0)
+}
+
 // The boost is an experiment behind BRAIN_RANK=weighted: a used bullet
 // gains at most one tie margin, a bullet that failed verify gains nothing.
 @(test)

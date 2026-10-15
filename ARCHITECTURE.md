@@ -224,9 +224,10 @@ old. On the working vault the first run named a checkout that had moved
 and commits no local repository held.
 
 Doctor gained two reads on top of its sections: the claims that failed
-the last verify; and `suspect`, a bullet served at rank three or better
-within ten turns before the person corrected the agent in that session,
-which joins the find log to the transcripts on the session id. A third,
+the last verify; and `suspect`, the bullets served for the prompt a
+correction follows, within ten turns. The join is that prompt — the prime
+of what the person said, else the latest lookup after it — and not every
+rank-3 hit of a pack that shares the serve's timestamp. A third,
 `contradictions` (two core bullets answering to one name and sharing no
 content word), was dropped on 2026-10-08: it found names two unrelated
 bullets share, which is no fault and wants no action.
@@ -235,14 +236,16 @@ bullets share, which is no fault and wants no action.
 
 The find log says what was served; `brain learn` says whether it helped.
 A serve was used when the session ran no later lookup on the bullet's
-names, no correction followed within ten turns, and, the strong form, an
-assistant turn went on to name the handle. The verdicts go to a
-`serve_outcome` table. A query word of four or more letters that led to
-a used bullet and is not among its names becomes an alias candidate once
-three distinct sessions agree; `--apply` writes it into the bullet's
-alias list. Aliases and synonym terms no query contained in 180 days are
-listed as dead, synonyms pruned on `--apply`, once fifty queries are
-logged. Every weight stays text a person can read and reverse.
+names, no correction follows the prompt that serve answered within ten
+turns, and, the strong form, an assistant turn went on to name the
+handle. A pack served beside it, or a later find, is not that prompt.
+The verdicts go to a `serve_outcome` table. A query word of four or more
+letters that led to a used bullet and is not among its names becomes an
+alias candidate once three distinct sessions agree; `--apply` writes it
+into the bullet's alias list. Aliases and synonym terms no query
+contained in 180 days are listed as dead, synonyms pruned on `--apply`,
+once fifty queries are logged. Every weight stays text a person can read
+and reverse.
 
 Ranking by use is an experiment, off by default: with
 `BRAIN_RANK=weighted`, find subtracts `min(1.0, 0.5 ln(1 + used))` from

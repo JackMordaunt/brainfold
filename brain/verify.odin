@@ -453,17 +453,77 @@ verify_all :: proc(cli: ^Cli, db: sqlite3.Db, only: []string, quick: bool) -> (c
 
 // ---- doctor's reads --------------------------------------------------------
 
-// Suspect is a bullet served shortly before the person corrected the
-// agent: the serve may have misled it.
+// Suspect is a bullet the prompt a correction follows had served: that
+// serve may have misled the agent. A pack's other hits are not that prompt.
 Suspect :: struct {
 	handle, file, session, served, user: string,
 }
 
 SUSPECT_TURNS :: 10 // turns between the serve and the correction, at most
 
-// suspects joins the find log to the transcripts: every correction in the
-// window, and the bullets served at rank three or better in its session
-// within SUSPECT_TURNS turns before it.
+// served_prompt is the query a correction follows. The prime of the user
+// prompt it answers wins; otherwise the latest lookup after that prompt
+// that is not a pack. A pack's hits share a timestamp with whatever was
+// served next, and rank is not the join.
+served_prompt :: proc(db, rc: sqlite3.Db, session, correction_ts: string) -> (query_id: i64, served: string, ok: bool) {
+	if session == "" || correction_ts == "" {
+		return
+	}
+	pst, perr := sqlite3.query(
+		rc,
+		"select ts, body from turn where session=? and role='user' and ts < ? order by ts desc limit 1",
+		session,
+		correction_ts,
+	)
+	if perr != nil {
+		return
+	}
+	if !sqlite3.next(&pst) {
+		sqlite3.finish(&pst)
+		return
+	}
+	prompt_ts := strings.clone(sqlite3.text(pst, 0))
+	prompt := strings.clone(sqlite3.text(pst, 1))
+	sqlite3.finish(&pst)
+	prime := strings.concatenate({"prime ", prompt})
+	from := log_time(prompt_ts)
+	stmt, qerr := sqlite3.query(
+		db,
+		`select id, ts, q from queries
+		 where session = ? and ts <= ? and q not like 'pack %'
+		 order by ts desc, id desc`,
+		session,
+		log_time(correction_ts),
+	)
+	if qerr != nil {
+		return
+	}
+	defer sqlite3.finish(&stmt)
+	fallback_id: i64
+	fallback_ts: string
+	for sqlite3.next(&stmt) {
+		ts := sqlite3.text(stmt, 1)
+		between := scalar_int(rc, "select count(*) from turn where session=? and ts > ? and ts <= ?", session, turn_time(ts), correction_ts)
+		if between > SUSPECT_TURNS {
+			break
+		}
+		q := sqlite3.text(stmt, 2)
+		if q == prompt || q == prime {
+			return sqlite3.integer(stmt, 0), strings.clone(ts), true
+		}
+		if fallback_ts == "" && ts >= from {
+			fallback_id = sqlite3.integer(stmt, 0)
+			fallback_ts = strings.clone(ts)
+		}
+	}
+	if fallback_ts != "" {
+		return fallback_id, fallback_ts, true
+	}
+	return
+}
+
+// suspects joins each correction to the bullets served for the prompt it
+// follows, not to every rank-3 hit in the ten turns before it.
 suspects :: proc(cli: ^Cli, db: sqlite3.Db) -> []Suspect {
 	if len(adapters_on(cli)) == 0 || !os.exists(cli.recall_db) {
 		return nil
@@ -479,23 +539,15 @@ suspects :: proc(cli: ^Cli, db: sqlite3.Db) -> []Suspect {
 		if m.kind != "correction" || m.session == "" {
 			continue
 		}
-		at := log_time(m.ts)
-		stmt, qerr := sqlite3.query(
-			db,
-			`select h.handle, h.file, q.ts from query_hits h join queries q on q.id = h.query_id
-			 where q.session = ? and h.rank <= 3 and q.ts <= ? order by q.ts desc`,
-			m.session,
-			at,
-		)
+		qid, served, ok := served_prompt(db, rc, m.session, m.ts)
+		if !ok {
+			continue
+		}
+		stmt, qerr := sqlite3.query(db, "select handle, file from query_hits where query_id=? order by rank", qid)
 		if qerr != nil {
 			continue
 		}
 		for sqlite3.next(&stmt) {
-			served := sqlite3.text(stmt, 2)
-			between := scalar_int(rc, "select count(*) from turn where session=? and ts > ? and ts <= ?", m.session, turn_time(served), m.ts)
-			if between > SUSPECT_TURNS {
-				continue
-			}
 			key := strings.concatenate({m.session, "/", sqlite3.text(stmt, 0)})
 			if seen[key] {
 				continue
