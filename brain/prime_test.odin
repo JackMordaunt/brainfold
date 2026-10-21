@@ -389,7 +389,9 @@ grok_harness_registers_the_shell_function_and_the_hooks :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(hooks, "brain.sh") && strings.contains(hooks, `"timeout":10`) && strings.contains(hooks, `"timeout":30`), hooks)
 	testing.expect(t, !strings.contains(hooks, "startup|clear|compact"), hooks)
 
-	rc, _ := path.read(path.join(f.home, ".bashrc"))
+	rc_file := path.join(f.home, ODIN_OS == .Darwin ? ".bash_profile" : ".bashrc")
+	rc, err := path.read(rc_file)
+	testing.expect_value(t, err, nil)
 	testing.expect(t, strings.contains(rc, "brain:grok >>>") && strings.contains(rc, "brain hooks on"), rc)
 	testing.expect(t, strings.contains(rc, "command grok --rules") && strings.contains(rc, "'/opt/brain'"), rc)
 	testing.expect(t, strings.contains(rc, "--cwd") && strings.contains(rc, "version"), rc)
@@ -399,14 +401,16 @@ grok_harness_registers_the_shell_function_and_the_hooks :: proc(t: ^testing.T) {
 
 	o, _, code = exec(f.cli, "hooks", "on", "--harness", "grok")
 	testing.expect_value(t, code, 0)
-	rc2, _ := path.read(path.join(f.home, ".bashrc"))
+	rc2, err2 := path.read(rc_file)
+	testing.expect_value(t, err2, nil)
 	testing.expect_value(t, rc2, rc)
 
 	o, _, code = exec(f.cli, "hooks", "off", "--harness", "grok")
 	testing.expect_value(t, code, 0)
 	testing.expect(t, !os.exists(script), "the hook script is gone")
 	testing.expect(t, !os.exists(path.join(f.home, ".grok", "hooks", "brain.json")), "the hook file is gone")
-	rc3, _ := path.read(path.join(f.home, ".bashrc"))
+	rc3, err3 := path.read(rc_file)
+	testing.expect_value(t, err3, nil)
 	testing.expect(t, !strings.contains(rc3, "brain:grok"), rc3)
 	testing.expect(t, strings.contains(o, "grok    SessionStart       brain pack    off\n"), o)
 }
@@ -448,8 +452,16 @@ grok_harness_primes_on_stop_and_packs_before_start :: proc(t: ^testing.T) {
 	testing.expect_value(t, code, 0)
 	testing.expect_value(t, o, "")
 
-	if _, found := sh.which("sh"); !found {
+	shell, found := sh.which("sh")
+	testing.expect(t, found, "sh must be on PATH to exercise Grok hooks")
+	if !found {
 		return
+	}
+	// Use the resolved shell executable and convert script paths below.
+	utility_path := "/usr/bin:/bin"
+	when ODIN_OS == .Windows {
+		// Search beside the shell and in its sibling usr/bin directory.
+		utility_path = strings.concatenate({path.dir(shell), ";", path.join(path.dir(shell), "..", "usr", "bin")})
 	}
 	bin := path.join(f.root, "bin")
 	testing.expect_value(t, path.mkdirs(bin), nil)
@@ -464,10 +476,10 @@ grok_harness_primes_on_stop_and_packs_before_start :: proc(t: ^testing.T) {
 	mode := os.Permissions_Read_All + os.Permissions_Execute_All + {.Write_User}
 	testing.expect_value(t, path.write(stub, strings.concatenate({
 		"#!/bin/sh\n",
-		"printf '%s %s %s\\n' \"$1\" \"$BRAIN_CALLER\" \"$BRAIN_SESSION\" >> \"", calls, "\"\n",
-		"printf '%s\\n' \"$PWD\" >> \"", pwds, "\"\n",
+		"printf '%s %s %s\\n' \"$1\" \"$BRAIN_CALLER\" \"$BRAIN_SESSION\" >> \"", posix_path(calls), "\"\n",
+		"printf '%s\\n' \"$PWD\" >> \"", posix_path(pwds), "\"\n",
 		"case \"$1\" in\n",
-		"  prime) cat > \"", seen, "\"; printf '%s\\n' 'bullet \"sqlite\"' ;;\n",
+		"  prime) cat > \"", posix_path(seen), "\"; printf '%s\\n' 'bullet \"sqlite\"' ;;\n",
 		"  pack) printf '%s\\n' 'pack body' ;;\n",
 		"  settle) printf '%s\\n' '{\"decision\":\"block\",\"reason\":\"propose\"}' ;;\n",
 		"esac\n",
@@ -475,9 +487,9 @@ grok_harness_primes_on_stop_and_packs_before_start :: proc(t: ^testing.T) {
 	})), nil)
 	testing.expect_value(t, path.write(fake, strings.concatenate({
 		"#!/bin/sh\n",
-		"printf '%s\\n' \"$1\" > \"", arg1, "\"\n",
-		"printf '%s\\n' \"$2\" > \"", arg2, "\"\n",
-		"printf '%s\\n' \"$#\" > \"", argc, "\"\n",
+		"printf '%s\\n' \"$1\" > \"", posix_path(arg1), "\"\n",
+		"printf '%s\\n' \"$2\" > \"", posix_path(arg2), "\"\n",
+		"printf '%s\\n' \"$#\" > \"", posix_path(argc), "\"\n",
 		"exit 0\n",
 	})), nil)
 	testing.expect_value(t, os.change_mode(stub, mode), nil)
@@ -491,9 +503,9 @@ grok_harness_primes_on_stop_and_packs_before_start :: proc(t: ^testing.T) {
 
 	prompt := `{"prompt":"why sqlite"}`
 	r := sh.exec(
-		{"/bin/sh", script},
+		{shell, posix_path(script)},
 		{
-			env = {"PATH=/usr/bin:/bin", "GROK_HOOK_EVENT=user_prompt_submit", "GROK_SESSION_ID=s1"},
+			env = {strings.concatenate({"PATH=", utility_path}), "GROK_HOOK_EVENT=user_prompt_submit", "GROK_SESSION_ID=s1"},
 			stdin = prompt,
 		},
 	)
@@ -509,8 +521,8 @@ grok_harness_primes_on_stop_and_packs_before_start :: proc(t: ^testing.T) {
 
 	stop := `{"reason":"end_turn","transcript_path":"/tmp/updates.jsonl","stopHookActive":false}`
 	r = sh.exec(
-		{"/bin/sh", script},
-		{env = {"PATH=/usr/bin:/bin", "GROK_HOOK_EVENT=stop", "GROK_SESSION_ID=s1"}, stdin = stop},
+		{shell, posix_path(script)},
+		{env = {strings.concatenate({"PATH=", utility_path}), "GROK_HOOK_EVENT=stop", "GROK_SESSION_ID=s1"}, stdin = stop},
 	)
 	testing.expect(t, r.ok, sh.error(r))
 	v, jerr := json.parse_string(strings.trim_space(r.stdout))
@@ -521,8 +533,8 @@ grok_harness_primes_on_stop_and_packs_before_start :: proc(t: ^testing.T) {
 
 	os.remove(calls)
 	r = sh.exec(
-		{"/bin/sh", script},
-		{env = {"PATH=/usr/bin:/bin", "GROK_HOOK_EVENT=stop", "GROK_SESSION_ID=s1"}, stdin = stop},
+		{shell, posix_path(script)},
+		{env = {strings.concatenate({"PATH=", utility_path}), "GROK_HOOK_EVENT=stop", "GROK_SESSION_ID=s1"}, stdin = stop},
 	)
 	testing.expect(t, r.ok, sh.error(r))
 	testing.expect(t, strings.contains(r.stdout, `"reason":"propose"`), r.stdout)
@@ -531,22 +543,25 @@ grok_harness_primes_on_stop_and_packs_before_start :: proc(t: ^testing.T) {
 
 	os.remove(calls)
 	r = sh.exec(
-		{"/bin/sh", script},
-		{env = {"PATH=/usr/bin:/bin", "GROK_HOOK_EVENT=stop", "GROK_SESSION_ID=s1"}, stdin = `{"reason":"shutdown"}`},
+		{shell, posix_path(script)},
+		{env = {strings.concatenate({"PATH=", utility_path}), "GROK_HOOK_EVENT=stop", "GROK_SESSION_ID=s1"}, stdin = `{"reason":"shutdown"}`},
 	)
 	testing.expect(t, r.ok, sh.error(r))
 	testing.expect_value(t, r.stdout, "")
 	testing.expect(t, !os.exists(calls), "a shutdown stop is not a turn")
 
-	if _, found := sh.which("bash"); !found {
+	bash, has_bash := sh.which("bash")
+	testing.expect(t, has_bash, "bash must be on PATH to exercise the Grok wrapper")
+	if !has_bash {
 		return
 	}
 	os.remove(calls)
 	os.remove(arg1)
-	rc := path.join(f.home, ".bashrc")
-	shell_env := []string{strings.concatenate({"PATH=", bin, ":/usr/bin:/bin"}), strings.concatenate({"HOME=", f.home})}
+	rc := path.join(f.home, ODIN_OS == .Darwin ? ".bash_profile" : ".bashrc")
+	sep := ";" when ODIN_OS == .Windows else ":"
+	shell_env := []string{strings.concatenate({"PATH=", bin, sep, utility_path}), strings.concatenate({"HOME=", posix_path(f.home)})}
 	r = sh.exec(
-		{"/bin/bash", "-c", `source "$1"; grok version`, "bash", rc},
+		{bash, "-c", `source "$1"; grok version`, "bash", posix_path(rc)},
 		{env = shell_env},
 	)
 	testing.expect(t, r.ok, sh.error(r))
@@ -558,7 +573,7 @@ grok_harness_primes_on_stop_and_packs_before_start :: proc(t: ^testing.T) {
 	elsewhere := path.join(f.root, "elsewhere")
 	testing.expect_value(t, path.mkdirs(elsewhere), nil)
 	r = sh.exec(
-		{"/bin/bash", "-c", `source "$1"; grok --cwd "$2" -p hello`, "bash", rc, elsewhere},
+		{bash, "-c", `source "$1"; grok --cwd "$2" -p hello`, "bash", posix_path(rc), posix_path(elsewhere)},
 		{env = shell_env},
 	)
 	testing.expect(t, r.ok, sh.error(r))
@@ -569,5 +584,5 @@ grok_harness_primes_on_stop_and_packs_before_start :: proc(t: ^testing.T) {
 	testing.expect_value(t, strings.trim_space(a2), "pack body")
 	testing.expect_value(t, strings.trim_space(n), "6")
 	pwd, _ := path.read(pwds)
-	testing.expect(t, strings.contains(pwd, elsewhere), pwd)
+	testing.expect(t, strings.contains(pwd, posix_path(elsewhere)), pwd)
 }
