@@ -371,8 +371,8 @@ Set up
   brain setup                how far this machine is from a working vault, step by step (--json)
   brain uninstall            undo those bindings; the vault is untouched
   brain locate [--tool]      the vault's path; --tool, this CLI's checkout
-  brain hooks [on|off]       pack, prime and settle in every harness here: Claude Code, pi, Grok;
-                             --harness <name> for one
+  brain hooks [on|off]       pack, prime and settle in every harness here: Claude Code, pi, Grok
+                             (Grok: pack and settle, no prime); --harness <name> for one
   brain update               replace this binary with the latest signed release
   brain version              this build
 

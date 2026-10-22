@@ -6,23 +6,22 @@ import "core:strings"
 import "jm:path"
 
 // The Grok harness (grok 1.0.52; ~/.grok/docs/user-guide/10-hooks.md and
-// 12-project-rules.md). Grok runs command hooks from $GROK_HOME/hooks/*.json
-// at session_start, user_prompt_submit, stop and session_end, and the event
-// arrives on stdin as JSON with both camelCase and snake_case names. What a
-// hook prints does not enter model context: a SessionStart systemMessage is
-// only a scrollback annotation, and an allowing UserPromptSubmit drops
-// additionalContext. Rules under $GROK_HOME/rules are read before any hook
-// runs, so a hook that writes one is too late for the session that just
-// started. Two channels do reach the model, both checked with `grok -p`
-// against 1.0.52: `grok --rules <text>` is in the instructions, and a Stop
-// reply `{"decision":"block","reason":...}` is fed back and the turn
-// continues. Brain registers one hook script, and a `grok` function in the
-// shell rc install already edits, which runs `brain pack` and execs the real
-// grok with that text as `--rules`. The script records prime at
-// user_prompt_submit and returns it on the end_turn Stop; a later end_turn
-// runs settle. Grok's transcript is updates.jsonl, which no recall adapter
-// reads, so settle stays quiet. Commands that do not open a session
-// (version, help, doctor, …) are left alone.
+// 12-project-rules.md). Grok runs command hooks from $GROK_HOME/hooks/*.json,
+// and the event arrives on stdin as JSON with both camelCase and snake_case
+// names. What a hook prints does not enter model context: a SessionStart
+// systemMessage is only a scrollback annotation, and an allowing
+// UserPromptSubmit drops additionalContext. Rules under $GROK_HOME/rules are
+// read before any hook runs, so a hook that writes one is too late for the
+// session that just started. The channel that reaches the model before the
+// first prompt is `grok --rules <text>`, checked with `grok -p` against
+// 1.0.52. So the pack rides a `grok` function in the shell rc install already
+// edits, which runs `brain pack` and execs the real grok with that text as
+// `--rules`; commands that do not open a session (version, help, doctor, …)
+// are left alone. Prime is not offered: only a Stop block reaches the model
+// mid-session, and replaying prime through it costs a model call on every
+// turn. The one hook script runs settle on an end_turn Stop. Grok's
+// transcript is updates.jsonl, which no recall adapter reads, so settle
+// stays quiet. A brain-pending directory left by the prime design is deleted.
 
 GROK_MARK :: "# brainfold hooks: written by `brain hooks on`; `brain hooks off` removes it"
 
@@ -119,7 +118,7 @@ grok_register :: proc(cli: ^Cli, exe: string) {
 			note(cli, "cannot write %s: %v", script, err)
 			return
 		}
-		say(cli, "%s: brain hooks written (pack, prime, settle)", script)
+		say(cli, "%s: brain hooks written (settle)", script)
 	}
 	file := grok_hooks_file(cli)
 	hooks := grok_hooks_body(script)
@@ -133,11 +132,21 @@ grok_register :: proc(cli: ^Cli, exe: string) {
 			note(cli, "cannot write %s: %v", file, err)
 			return
 		}
-		say(cli, "%s: brain hooks written (pack, prime, settle)", file)
+		say(cli, "%s: brain hooks written (settle)", file)
 	}
+	grok_clear_pending(cli)
 	fn := grok_function_body(exe)
 	for rc in path_rc_files(cli) {
 		rc_block(cli, rc, fn, "grok", "brain hooks on")
+	}
+}
+
+// grok_clear_pending deletes the brain-pending directory the prime design
+// kept under the Grok home; nothing reads it now.
+grok_clear_pending :: proc(cli: ^Cli) {
+	pending := path.join(grok_home(cli), "brain-pending")
+	if !cli.dry && os.is_dir(pending) {
+		os.remove_all(pending)
 	}
 }
 
@@ -156,10 +165,7 @@ grok_unregister :: proc(cli: ^Cli) {
 			os.remove(file)
 		}
 	}
-	pending := path.join(grok_home(cli), "brain-pending")
-	if !cli.dry && os.is_dir(pending) {
-		os.remove_all(pending)
-	}
+	grok_clear_pending(cli)
 	for rc in path_rc_files(cli) {
 		block_remove(cli, rc, "grok")
 	}
@@ -171,65 +177,27 @@ grok_status :: proc(cli: ^Cli) -> []Hook_Registration {
 	on := ok && strings.has_prefix(text, GROK_MARK) && hok && strings.contains(hooks, "brain.sh")
 	out := make([dynamic]Hook_Registration)
 	append(&out, Hook_Registration{event = "SessionStart", sub = "pack", on = on})
-	append(&out, Hook_Registration{event = "UserPromptSubmit", sub = "prime", on = on})
 	append(&out, Hook_Registration{event = "Stop", sub = "settle", on = on})
 	return out[:]
 }
 
 // GROK_SCRIPT is the hook body; __BRAIN__ becomes the quoted binary path.
-// The shell function delivers the pack. This script only records prime and
-// returns it, or settle, on Stop. A shutdown or channel_closed Stop is
-// observe-only, so anything but end_turn exits before either runs.
+// The shell function delivers the pack, so this script only runs settle on
+// Stop. Anything but an end_turn Stop exits before settle runs: Grok 1.0.52
+// sends shutdown and channel_closed Stops too, and they end no turn.
 GROK_SCRIPT :: `BRAIN=__BRAIN__
-HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-ROOT=$(CDPATH= cd -- "$HERE/.." && pwd)
-PENDING="$ROOT/brain-pending"
 EVENT=${1:-$GROK_HOOK_EVENT}
 sid=${GROK_SESSION_ID:-session}
 
-json_quote() {
-  awk 'BEGIN { ORS=""; printf "\"" }
-  {
-    if (NR > 1) printf "\\n"
-    gsub(/\\/, "\\\\")
-    gsub(/"/, "\\\"")
-    gsub(/\r/, "\\r")
-    gsub(/\t/, "\\t")
-    printf "%s", $0
-  }
-  END { printf "\"" }'
-}
-
 case "$EVENT" in
-  session_start)
-    BRAIN_CALLER=grok BRAIN_SESSION="$sid" "$BRAIN" pack >/dev/null 2>&1 || true
-    ;;
-  user_prompt_submit)
-    out=$(BRAIN_CALLER=grok BRAIN_SESSION="$sid" "$BRAIN" prime --harness grok 2>/dev/null) || true
-    if [ -n "$out" ]; then
-      mkdir -p "$PENDING"
-      printf '%s\n' "$out" > "$PENDING/$sid"
-    else
-      rm -f "$PENDING/$sid"
-    fi
-    ;;
   stop)
     json=$(cat)
     case "$json" in
       *'"reason":"end_turn"'*) ;;
       *) exit 0 ;;
     esac
-    pend="$PENDING/$sid"
-    if [ -s "$pend" ]; then
-      printf '{"decision":"block","reason":%s}\n' "$(json_quote < "$pend")"
-      rm -f "$pend"
-      exit 0
-    fi
     trans=$(printf '%s' "$json" | sed -n 's/.*"transcript_path":"\([^"]*\)".*/\1/p')
     BRAIN_CALLER=grok BRAIN_SESSION="$sid" "$BRAIN" settle --harness grok --session "$sid" --transcript "$trans" 2>/dev/null || true
-    ;;
-  session_end)
-    rm -f "$PENDING/$sid"
     ;;
 esac
 exit 0
@@ -262,15 +230,10 @@ GROK_FUNCTION :: `grok() {
 }`
 
 // GROK_HOOKS is the matcher-group file. __CMD__ becomes the JSON string of
-// the shell command. No SessionStart matcher: Claude's startup|clear|compact
-// never matches Grok, whose source is new or load. Stop is longer than the
-// five-second default and shorter than Stop's ten-minute one.
+// the shell command. Settle gets 30 s, room for the CLI to open the vault.
 GROK_HOOKS :: `{
   "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": __CMD__, "timeout":10}]}],
-    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": __CMD__, "timeout":10}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": __CMD__, "timeout":30}]}],
-    "SessionEnd": [{"hooks": [{"type": "command", "command": __CMD__, "timeout":10}]}]
+    "Stop": [{"hooks": [{"type": "command", "command": __CMD__, "timeout":30}]}]
   }
 }
 `

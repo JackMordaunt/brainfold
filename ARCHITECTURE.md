@@ -334,10 +334,11 @@ the same table.
   the shell rc. Grok 1.0.52 runs those hooks, and what they print is not
   model context; `$GROK_HOME/rules` is read before any hook. The function
   runs `brain pack` and execs `grok --rules` with that text, which the
-  session does see. `user_prompt_submit` records `brain prime`, and a
-  Stop whose reason is `end_turn` continues with
-  `{"decision":"block","reason":...}` holding that text. A later Stop
-  runs `brain settle`. The transcript is `updates.jsonl`, which no recall
+  session does see. The one registered hook is Stop, and a Stop whose
+  reason is `end_turn` runs `brain settle`. There is no prime: only a
+  Stop block reaches the model mid-session, and it would cost a model
+  call every turn. `hooks on` deletes a `brain-pending` directory an
+  earlier build left. The transcript is `updates.jsonl`, which no recall
   adapter reads, so settle stays quiet.
 
 Adding a harness is one file: a detect, a register and unregister, a
