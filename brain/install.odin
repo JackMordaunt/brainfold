@@ -212,15 +212,18 @@ on_path :: proc(cli: ^Cli, dir: string) -> bool {
 }
 
 // The same preference order the justfile standard uses for `install`.
-pick_bindir :: proc(cli: ^Cli) -> string {
-	candidates := [5]string {
+bin_dirs :: proc(cli: ^Cli) -> [5]string {
+	return {
 		path.join(cli.home, ".local", "bin"),
 		path.join(cli.home, "bin"),
 		getenv(cli, "GOBIN"),
 		getenv(cli, "GOPATH") != "" ? path.join(getenv(cli, "GOPATH"), "bin") : "",
 		"/usr/local/bin",
 	}
-	for d in candidates {
+}
+
+pick_bindir :: proc(cli: ^Cli) -> string {
+	for d in bin_dirs(cli) {
 		if d != "" && os.is_dir(d) && writable_dir(d) {
 			return d
 		}
@@ -489,8 +492,10 @@ CLAUDE_BLOCK :: "@~/.agents/AGENTS.md\n\nThe Brain is this machine's shared agen
 // install_binary puts this executable on PATH as `brain`. A symlink keeps an
 // installed command current with its checkout; where links are refused
 // (Windows without Developer Mode) the file is copied and the recorded tool
-// path keeps it pointed at the checkout. The shell version's wrappers are
-// removed, because Git Bash would run a `brain` script before `brain.exe`.
+// path keeps it pointed at the checkout. On Windows the shell-era `brain`
+// script and `brain.cmd` are removed from every directory install might
+// have used: PowerShell runs an extensionless file in an earlier PATH entry
+// and refuses it, and Git Bash runs that script before `brain.exe`.
 install_binary :: proc(cli: ^Cli, bindir: string) -> (dest: string) {
 	dest = path.join(bindir, strings.concatenate({"brain", EXE}))
 	// BRAIN_EXE names another build to install, for a script that installs
@@ -510,9 +515,19 @@ install_binary :: proc(cli: ^Cli, bindir: string) -> (dest: string) {
 		return
 	}
 	when ODIN_OS == .Windows {
-		for stale in ([2]string{path.join(bindir, "brain"), path.join(bindir, "brain.cmd")}) {
-			if os.is_file(stale) && os.remove(stale) == nil {
-				told(cli, .Install_Removed_Wrapper, stale)
+		// An extensionless `brain` left in an earlier PATH directory is what
+		// PowerShell runs, and it refuses the shell script as a document.
+		// Git Bash does the same inside one directory, preferring the script
+		// to `brain.exe`. Both names are only ever the shell-era wrapper.
+		for d in bin_dirs(cli) {
+			if d == "" {
+				continue
+			}
+			for name in ([2]string{"brain", "brain.cmd"}) {
+				stale := path.join(d, name)
+				if os.is_file(stale) && os.remove(stale) == nil {
+					told(cli, .Install_Removed_Wrapper, stale)
+				}
 			}
 		}
 	}

@@ -44,6 +44,29 @@ blocks_are_added_refreshed_and_removed :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(text, "<!-- brain:claude >>> managed by `brain install`; edit the vault, not this block -->\n@~/.agents/AGENTS.md\n<!-- brain:claude <<< -->\n"), text)
 }
 
+// PowerShell resolves `brain` to an extensionless file in an earlier PATH
+// directory and refuses to run the shell script. Install has to delete that
+// wrapper even when this run places brain.exe somewhere else.
+@(test)
+install_removes_a_wrapper_earlier_on_path :: proc(t: ^testing.T) {
+	when ODIN_OS != .Windows {
+		return
+	}
+	context.allocator = context.temp_allocator
+	f := fixture(t)
+	defer fixture_destroy(f)
+	bin := path.join(f.home, "bin")
+	local := path.join(f.home, ".local", "bin")
+	testing.expect_value(t, path.mkdirs(bin), nil)
+	testing.expect_value(t, path.mkdirs(local), nil)
+	wrapper := path.join(bin, "brain")
+	testing.expect_value(t, path.write(wrapper, "#!/usr/bin/env bash\n"), nil)
+	install_binary(f.cli, local)
+	testing.expect(t, !os.exists(wrapper), wrapper)
+	installed := path.join(local, "brain.exe")
+	testing.expect(t, os.is_file(installed) || is_link(installed), installed)
+}
+
 // Install into a throwaway home: the installed command must run as this
 // checkout's tool, not resolve TOOL to $HOME the way the copied shell script
 // once did. GOPATH and GOBIN are unset so install cannot pick a real bin
