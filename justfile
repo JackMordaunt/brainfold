@@ -1,5 +1,10 @@
-# Recipes run through `sh -cu`: just ships no shell, so on Windows this needs
-# Git Bash on PATH. The tool itself is one static binary and needs nothing.
+# Line recipes run through `sh -cu`. Shebangs are `/bin/bash`, which just maps
+# through Git Bash's cygpath to Git's bash.exe; `bash` on PATH is the WSL
+# launcher. That bash is not a login shell, so System32 stays ahead of Git's
+# coreutils and `sort` is Windows sort.exe. Prepend Git's usr\bin. The branch
+# is lazy, so a non-Windows parse never runs cygpath. The tool itself is one
+# static binary and needs nothing.
+export PATH := if os() == "windows" { `cygpath -w /usr/bin` + ";" + env("PATH", "") } else { env("PATH", "") }
 #
 #   just deps      fetch the jm submodule and build its SQLite archive
 #   just build     debug binary with the debug allocator and ASan -> build/debug
@@ -32,6 +37,8 @@ uiflags := "-vet -strict-style -collection:jm=" + jm
 # `just build SAN=` drops the sanitizer when a library gets in its way.
 san   := env("SAN", "-sanitize:address")
 exe   := if os() == "windows" { ".exe" } else { "" }
+# In-script calls. /usr/bin/bash is Git Bash, not the WSL launcher on PATH.
+bash  := if os() == "windows" { "/usr/bin/bash" } else { "bash" }
 # Blend2D is C++: anything linking jm:ui/render needs the runtime off Windows.
 cxx_link := if os() == "windows" { "" } else { "-extra-linker-flags:\"-lstdc++\"" }
 targets := "linux_amd64 darwin_arm64 windows_amd64"
@@ -43,7 +50,7 @@ default:
 # zstd archives jm:sqlite3 and jm:zstd link (zstd decodes a patched update;
 # see jm/selfupdate), and the libgit2 archive jm:git links.
 deps:
-    #!/usr/bin/env bash
+    #!/bin/bash
     set -euo pipefail
     if [ "{{jm}}" = "{{root}}/jm" ] && [ ! -e jm/.git ]; then git submodule update --init jm; fi
     if ! ls "{{jm}}"/sqlite3/lib/sqlite3.* >/dev/null 2>&1; then (cd "{{jm}}" && just sqlite); fi
@@ -90,7 +97,7 @@ test: build test-installer
     {{odin}} test msg {{uiflags}} -out:build/test/msg{{exe}}
     {{odin}} test brain {{san}} {{flags}} -define:ODIN_TEST_THREADS=1 -out:build/test/brain{{exe}}
     {{odin}} test term {{san}} {{uiflags}} -out:build/test/term{{exe}}
-    @for f in bin/hooks/*; do bash -n "$f" && echo "ok $f"; done
+    @for f in bin/hooks/*; do "{{bash}}" -n "$f" && echo "ok $f"; done
 
 # The installers against a fake release on disk: the release binary under
 # the names CI would publish, a sha256sums.txt beside them, served over
@@ -100,7 +107,7 @@ test: build test-installer
 # must refuse an asset whose checksum no longer matches. Off Windows its
 # .exe cannot run, and PowerShell would hand it to xdg-open.
 test-installer: release
-    #!/usr/bin/env bash
+    #!/bin/bash
     set -euo pipefail
     case "$(uname -s)" in Linux*) os=linux;; Darwin*) os=darwin;; *) os=windows;; esac
     case "$(uname -m)" in x86_64|amd64) arch=amd64;; *) arch=arm64;; esac
@@ -141,8 +148,15 @@ test-installer: release
     fi
 
 # Put the CLI on PATH and bind this machine to a vault.
+# The line runs in Git Bash, which eats unquoted backslashes, so a Windows
+# path has to be quoted and a leading ~ expanded before brain.exe sees it.
 install VAULT: release
-    build/release/brain{{exe}} install {{VAULT}}
+    #!/bin/bash
+    set -euo pipefail
+    vault='{{VAULT}}'
+    case $vault in '~'/*) vault=$HOME/${vault#'~/'} ;; esac
+    if command -v cygpath >/dev/null 2>&1; then vault=$(cygpath -w "$vault"); fi
+    build/release/brain{{exe}} install "$vault"
 
 # Hot reload for the windowed tools: HOST owns the window and DIR is the
 # jm:ui child that draws into it. The child is rebuilt here every time one
@@ -162,7 +176,7 @@ install VAULT: release
 #
 # Open DIR's child in a hot-reloading window titled TITLE
 hot DIR TITLE SIZE="1440x960" HOST="tools/host": deps ui-deps
-    #!/usr/bin/env bash
+    #!/bin/bash
     set -euo pipefail
     mkdir -p build/debug build/hot
     host=build/debug/$(echo "{{HOST}}" | tr / -){{exe}}
@@ -243,7 +257,7 @@ hot DIR TITLE SIZE="1440x960" HOST="tools/host": deps ui-deps
 #
 # Build or fetch the native libraries jm:ui links
 ui-deps:
-    #!/usr/bin/env bash
+    #!/bin/bash
     set -euo pipefail
     cd "{{jm}}"
     [ -e ui/blend2d/lib/libblend2d.a ] && [ -e ui/kb/lib/kb_text_shape.a ] && [ -e ui/accesskit/lib/libaccesskit.a ] || just blend2d kb accesskit
@@ -268,7 +282,7 @@ desk-png PAGE="Activity" THEME="Light": deps ui-deps
 #
 # Run the desk's suites
 desk-test: deps
-    #!/usr/bin/env bash
+    #!/bin/bash
     set -euo pipefail
     mkdir -p build/test
     {{odin}} test msg {{uiflags}} -out:build/test/msg{{exe}}
@@ -283,7 +297,7 @@ desk-test: deps
 #
 # Render README.md and ARCHITECTURE.md to build/ and open the README
 preview:
-    #!/usr/bin/env bash
+    #!/bin/bash
     set -euo pipefail
     mkdir -p build
     for src in README.md ARCHITECTURE.md docs/REFERENCE.md docs/PROOF.md; do
