@@ -15,7 +15,7 @@ threads, and every button a command it carries out; see app/.
 	desk -window                      one process, window and application
 	desk -page Inbox -png out.png     render a page headlessly, once the vault has answered
 	desk -theme dark -size 960x1030 -page Doctor -png out.png
-	desk -brain build/debug/brain ... another CLI binary than the one on PATH
+	desk -brain build/minimal/brain ... another CLI binary than the one on PATH
 
 Headless, the flags run in order: the settings (-page, -theme, -size,
 -brain) and then ui/render's steps (-png, -dump, -click, -key, ...), each

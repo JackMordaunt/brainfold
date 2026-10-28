@@ -7,17 +7,38 @@
 export PATH := if os() == "windows" { `cygpath -w /usr/bin` + ";" + env("PATH", "") } else { env("PATH", "") }
 #
 #   just deps      fetch the jm submodule and build its SQLite archive
-#   just build     debug binary with the debug allocator and ASan -> build/debug
-#   just release   optimised binary                                -> build/release
+#   just build [mode]   the brain binary -> build/<mode>/brain. Default minimal.
+#   just run [mode] [args...]  build that mode and run it, arguments after the mode
+#   just release   the release binary. Exactly `just build release` -> build/release
+#   just publish   the release binary, and where it is. Only the release mode.
 #   just test      the package's tests against the fixture vault
-#   just check     type-check for linux, darwin and windows, debug and release
+#   just check     type-check for linux, darwin and windows, with and without -debug
 #   just install   bind this machine to a vault
-#   just desk      open the desk, hot-reloading tools/desk; desk-png, desk-test
-#   just hot DIR TITLE  the loop under the desk: any jm:ui child in a window
+#   just desk [mode]  open the desk, hot-reloading tools/desk; desk-png, desk-test
+#   just hot [mode] DIR TITLE  the loop under the desk: any jm:ui child in a window
 #   just proof     what a lookup costs a real agent session: vanilla, plain markdown, brain
 #   just suite     every proof experiment in tools/proof/AXES.md, smoke size; SMOKE=0 for all
 #   just preview   render README.md, ARCHITECTURE.md and docs/ to build/ and open them
 #   just clean     remove build/ and the index
+#
+# The mode is minimal, speed, asan, tsan or release. build, run and hot
+# default to minimal. The flags are minimal_opt and the variables beside
+# it. minimal, speed, asan and tsan pass -debug. release does not.
+#
+#   minimal   -debug -o:minimal, no sanitizer. The daily build.
+#   speed     -debug -o:speed, no sanitizer.
+#   asan      -debug -o:none -sanitize:address. Always the sanitizer.
+#             SAN= does not change this mode.
+#   tsan      -debug -o:none -sanitize:thread. Its own binary. Address and
+#             thread sanitizers are not combined.
+#   release   -o:speed, no -debug. publish accepts only this mode.
+#
+# just hot adds -define:DEBUG_ALLOC_BACKTRACES=false on every mode but
+# release, to the host and the child. A release hot build is -o:speed only.
+#
+# Test and desk-test still honour SAN, whose default is -sanitize:address.
+# SAN= does not change build, run, hot or publish. The tests launch a
+# binary built with SAN, not the minimal one.
 
 odin  := env("ODIN", "odin")
 root  := replace(justfile_directory(), "\\", "/")
@@ -34,8 +55,16 @@ stamp  := commit + (if dirty != "" { "-dirty" } else { "" })
 flags := "-vet -strict-style -collection:jm=" + jm + " -define:BRAIN_TOOL=" + root + " -define:COMMIT='\"" + stamp + "\"'"
 # The same without BRAIN_TOOL, which only the CLI reads: a jm:ui child would warn.
 uiflags := "-vet -strict-style -collection:jm=" + jm
-# `just build SAN=` drops the sanitizer when a library gets in its way.
+# Test and desk-test pass SAN through. The default is AddressSanitizer.
+# SAN= drops it. build, run, hot and publish ignore it.
 san   := env("SAN", "-sanitize:address")
+# Compiler flags for each mode. mode_arms is the shell that sets opt from
+# the mode. release is -o:speed and is not in the list: it passes no -debug.
+minimal_opt := "-debug -o:minimal"
+speed_opt := "-debug -o:speed"
+asan_opt := "-debug -o:none -sanitize:address"
+tsan_opt := "-debug -o:none -sanitize:thread"
+mode_arms := "minimal) opt='" + minimal_opt + "' ;; " + "speed) opt='" + speed_opt + "' ;; " + "asan) opt='" + asan_opt + "' ;; " + "tsan) opt='" + tsan_opt + "' ;;"
 exe   := if os() == "windows" { ".exe" } else { "" }
 # In-script calls. /usr/bin/bash is Git Bash, not the WSL launcher on PATH.
 bash  := if os() == "windows" { "/usr/bin/bash" } else { "bash" }
@@ -59,15 +88,50 @@ deps:
     # on the machine it runs on (jm:git links the system libgit2 without it).
     if ! ls "{{jm}}"/git/lib/*git2.* >/dev/null 2>&1; then (cd "{{jm}}" && just libgit2); fi
 
-# Debug binary -> build/debug/brain
-build: deps
-    mkdir -p build/debug
-    {{odin}} build . -debug {{san}} {{flags}} -out:build/debug/brain{{exe}}
+# The brain binary -> build/<mode>/brain. The mode is minimal, speed, asan,
+# tsan or release, and minimal when it is omitted.
+build mode="minimal": deps
+    #!/bin/bash
+    set -euo pipefail
+    case "{{mode}}" in
+    {{mode_arms}}
+    release) opt="-o:speed" ;;
+    *) echo "build: the mode is minimal, speed, asan, tsan or release, not {{mode}}" >&2; exit 1 ;;
+    esac
+    mkdir -p build/{{mode}}
+    {{odin}} build . $opt {{flags}} -out:build/{{mode}}/brain{{exe}}
 
-# Optimised binary -> build/release/brain
-release: deps
-    mkdir -p build/release
-    {{odin}} build . -o:speed {{flags}} -out:build/release/brain{{exe}}
+# A first argument is a mode only when it is exactly one of the five.
+# Anything else is an argument of the binary. The default mode is minimal.
+#
+# Build that mode and run it: just run [mode] [args...]
+[positional-arguments]
+run *args:
+    #!/bin/bash
+    set -euo pipefail
+    mode=minimal
+    case "${1:-}" in
+    minimal|speed|asan|tsan|release) mode=$1; shift ;;
+    esac
+    just build "$mode"
+    exec "build/$mode/brain{{exe}}" "$@"
+
+# What test-installer, install, proof and suite already depend on.
+# Exactly `just build release`, so those callers still build build/release/brain.
+release: (build "release")
+
+# Build the release binary and print where it is. There is no package, and
+# this does not install onto PATH. Any other mode is refused before the
+# compiler runs.
+publish mode="release":
+    #!/bin/bash
+    set -euo pipefail
+    if [ "{{mode}}" != release ]; then
+        echo "publish: only release is published, not {{mode}}" >&2
+        exit 1
+    fi
+    just build release
+    echo "publish: the release is build/release/brain{{exe}}"
 
 # The proof: what a lookup costs a real agent session with no notes, with the
 # vault as plain markdown, and through brain. Needs claude logged in.
@@ -92,8 +156,13 @@ check: deps
 # install into a throwaway home, then a syntax check of the hooks.
 # One thread: tests that spawn git deadlock in parallel on Windows, where a
 # child inherits another child's pipe and its parent never reads EOF.
-test: build test-installer
-    mkdir -p build/test
+# The binary they launch is build/debug/brain, built here with SAN and not
+# by `just build`, which ignores SAN. SAN= leaves AddressSanitizer off; the
+# default passes it. The asan mode cannot turn the sanitizer off, so this
+# binary is not build/asan and not build/minimal.
+test: test-installer
+    mkdir -p build/debug build/test
+    {{odin}} build . -debug {{san}} {{flags}} -out:build/debug/brain{{exe}}
     {{odin}} test msg {{uiflags}} -out:build/test/msg{{exe}}
     {{odin}} test brain {{san}} {{flags}} -define:ODIN_TEST_THREADS=1 -out:build/test/brain{{exe}}
     {{odin}} test term {{san}} {{uiflags}} -out:build/test/term{{exe}}
@@ -161,10 +230,11 @@ install VAULT: release
 # Hot reload for the windowed tools: HOST owns the window and DIR is the
 # jm:ui child that draws into it. The child is rebuilt here every time one
 # of the .odin files under DIR changes, into its own timestamped binary
-# under build/hot, and named in build/<name>.watch, which the host re-reads
-# and respawns from (ui/shell.run_host). The host is rebuilt and restarted
-# when a file it is built from changes: its own package and every package
-# it reaches by a relative import, test files aside. A host that answers
+# under build/hot/<mode>, and named in build/hot/<mode>/<name>.watch, which
+# the host re-reads and respawns from (ui/shell.run_host). The host is
+# rebuilt and restarted when a file it is built from changes: its own
+# package and every package it reaches by a relative import, test files
+# aside. A host that answers
 # the child's needs (tools/desk/host) shares their shapes with it, and one
 # built from the shapes before an edit misreads the child's after it. The
 # loop is a shell one rather than jm's tools/hot-watch because that build
@@ -174,21 +244,49 @@ install VAULT: release
 # desktop is (Personal/brainfold), or on LOGO_WORKSPACE when set; the rule
 # lives for the session only.
 #
-# Open DIR's child in a hot-reloading window titled TITLE
-hot DIR TITLE SIZE="1440x960" HOST="tools/host": deps ui-deps
+# A first argument is a mode only when it is exactly minimal, speed, asan,
+# tsan or release, so `just hot tools/desk brainfold` is still the desk.
+# The default mode is minimal. The host lands in build/<mode>/ and the
+# child under build/hot/<mode>/. Every mode except release adds
+# -define:DEBUG_ALLOC_BACKTRACES=false to the host and the child. release
+# is -o:speed only.
+#
+# Open DIR's child in a hot-reloading window titled TITLE: just hot [mode] DIR TITLE
+[positional-arguments]
+hot *args: deps ui-deps
     #!/bin/bash
     set -euo pipefail
-    mkdir -p build/debug build/hot
-    host=build/debug/$(echo "{{HOST}}" | tr / -){{exe}}
-    name=$(basename "{{DIR}}")
-    pointer=build/$name.watch
-    restart=build/$name.restart
-    hostpid=build/$name.hostpid
+    mode=minimal
+    case "${1:-}" in
+    minimal|speed|asan|tsan|release) mode=$1; shift ;;
+    esac
+    case "$mode" in
+    {{mode_arms}}
+    release) opt="-o:speed" ;;
+    *) echo "hot: the mode is minimal, speed, asan, tsan or release, not $mode" >&2; exit 1 ;;
+    esac
+    if [ "$mode" != release ]; then
+      opt="$opt -define:DEBUG_ALLOC_BACKTRACES=false"
+    fi
+    if [ $# -lt 2 ]; then
+      echo "hot: usage: just hot [mode] DIR TITLE [SIZE [HOST]]" >&2
+      exit 1
+    fi
+    dir=$1
+    title=$2
+    size=${3:-1440x960}
+    host_src=${4:-tools/host}
+    mkdir -p "build/$mode" "build/hot/$mode"
+    host=build/$mode/$(echo "$host_src" | tr / -){{exe}}
+    name=$(basename "$dir")
+    pointer=build/hot/$mode/$name.watch
+    restart=build/hot/$mode/$name.restart
+    hostpid=build/hot/$mode/$name.hostpid
     rm -f "$pointer" "$restart" "$hostpid"
     # The host's sources: its package, then each package a non-test file
     # imports by a relative path, transitively.
     host_sources() {
-      local todo=("{{HOST}}") seen=" " d f imp
+      local todo=("$host_src") seen=" " d f imp
       while [ ${#todo[@]} -gt 0 ]; do
         d=$(realpath --relative-to=. "${todo[0]}"); todo=("${todo[@]:1}")
         case "$seen" in *" $d "*) continue;; esac
@@ -204,19 +302,19 @@ hot DIR TITLE SIZE="1440x960" HOST="tools/host": deps ui-deps
       done
     }
     host_mt() { host_sources | xargs stat -c %Y | sort -n | tail -1; }
-    build_host() { {{odin}} build "{{HOST}}" -debug {{uiflags}} {{cxx_link}} -out:"$host.new" && mv "$host.new" "$host"; }
+    build_host() { {{odin}} build "$host_src" $opt {{uiflags}} {{cxx_link}} -out:"$host.new" && mv "$host.new" "$host"; }
     build_host
     (
       last="" last_host=$(host_mt)
       while true; do
-        mt=$(find "{{DIR}}" -name '*.odin' -exec stat -c %Y {} + | sort -n | tail -1)
+        mt=$(find "$dir" -name '*.odin' -exec stat -c %Y {} + | sort -n | tail -1)
         if [ "$mt" != "$last" ]; then
           last=$mt
-          out=build/hot/$name-$(date +%s%N){{exe}}
-          if {{odin}} build "{{DIR}}" -debug {{uiflags}} {{cxx_link}} -out:"$out"; then
+          out=build/hot/$mode/$name-$(date +%s%N){{exe}}
+          if {{odin}} build "$dir" $opt {{uiflags}} {{cxx_link}} -out:"$out"; then
             printf '%s' "$out" > "$pointer"
             echo "hot: ready $out"
-            ls -t build/hot/$name-* | tail -n +3 | xargs -r rm -f
+            ls -t build/hot/$mode/$name-* | tail -n +3 | xargs -r rm -f
           else
             echo "hot: build failed; the window keeps the last good build"
           fi
@@ -240,12 +338,12 @@ hot DIR TITLE SIZE="1440x960" HOST="tools/host": deps ui-deps
     while [ ! -f "$pointer" ]; do sleep 0.2; done
     if command -v hyprctl >/dev/null 2>&1 && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
       ws="${LOGO_WORKSPACE:-$(basename "$(dirname "{{root}}")")/$(basename "{{root}}")}"
-      hyprctl eval "hl.window_rule({ match = { title = '^({{TITLE}})$' }, workspace = 'name:$ws' })" >/dev/null || true
+      hyprctl eval "hl.window_rule({ match = { title = '^($title)$' }, workspace = 'name:$ws' })" >/dev/null || true
     fi
     # The window closing ends the loop; a restart the watcher asked for
     # starts the host again.
     while true; do
-      "$host" "$pointer" "{{TITLE}}" "{{SIZE}}" &
+      "$host" "$pointer" "$title" "$size" &
       echo $! > "$hostpid"
       wait $! || true
       [ -f "$restart" ] || break
@@ -266,14 +364,24 @@ ui-deps:
 # answering the view's needs on worker threads. The view, tools/desk, is
 # the hot-reloaded child. BRAIN names another CLI binary than brain on PATH.
 #
-# Open the desk, hot-reloading tools/desk as it is edited
-desk: (hot "tools/desk" "brainfold" "1280x840" "tools/desk/host")
+# Open the desk, hot-reloading tools/desk as it is edited. The mode is the
+# same five, minimal when it is omitted, and is passed through to hot.
+desk mode="minimal": (hot mode "tools/desk" "brainfold" "1280x840" "tools/desk/host")
 
-# Render a desk page against this machine's vault to build/desk-PAGE.png
-desk-png PAGE="Activity" THEME="Light": deps ui-deps
-    mkdir -p build/debug
-    {{odin}} build tools/desk -debug {{uiflags}} {{cxx_link}} -out:build/debug/desk{{exe}}
-    build/debug/desk{{exe}} -theme "{{THEME}}" -page "{{PAGE}}" -png "build/desk-{{PAGE}}.png"
+# Render a desk page against this machine's vault to build/desk-PAGE.png.
+# The binary is build/<mode>/desk. The mode is the same five, minimal when
+# it is omitted.
+desk-png mode="minimal" PAGE="Activity" THEME="Light": deps ui-deps
+    #!/bin/bash
+    set -euo pipefail
+    case "{{mode}}" in
+    {{mode_arms}}
+    release) opt="-o:speed" ;;
+    *) echo "desk-png: the mode is minimal, speed, asan, tsan or release, not {{mode}}" >&2; exit 1 ;;
+    esac
+    mkdir -p build/{{mode}}
+    {{odin}} build tools/desk $opt {{uiflags}} {{cxx_link}} -out:build/{{mode}}/desk{{exe}}
+    build/{{mode}}/desk{{exe}} -theme "{{THEME}}" -page "{{PAGE}}" -png "build/desk-{{PAGE}}.png"
 
 # The desk's suites: the CLI client on canned answers, the view in a probe,
 # and the application end to end on its real pipeline and workers. None

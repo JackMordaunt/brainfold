@@ -535,7 +535,7 @@ them up.
 | `branding/` | the mark and hero lockup, light and dark, SVG and PNG, exported from the logo tool (`just export brainfold DIR` there); the platform badges are static |
 | `tools/proof/` | the proof: the same questions asked of real Claude Code sessions with no notes, with the vault as plain markdown, through brain, and with the hooks alone (`brain-auto`); `just proof`, then `regrade.sh` to re-score a run without re-running it |
 | `tools/desk/` | the desk: the control room over a vault on jm:ui/primer. Each page needs what it shows; `app/` answers by running `brain <command> --json` on worker threads, re-reads what is still needed every 5 s and after each command, and `host/` owns the window and the application while the view hot-reloads (`just desk`, `just desk-png`, `just desk-test`) |
-| `tools/host/` | the default window for `just hot DIR TITLE`, which rebuilds a child on save and the host respawns it |
+| `tools/host/` | the default window for `just hot [mode] DIR TITLE`, which rebuilds a child on save and the host respawns it |
 | `jm/` | the [jm collection](https://mordaunt.dev/code/jm), pinned as a submodule |
 
 `testdata/vault` is a fixture of exactly the vault's shape; `just test` runs
@@ -556,12 +556,15 @@ libgit2 archives when any is missing;
 
 ## Development
 
+`just build` takes a mode and writes `build/<mode>/brain`. The mode is `minimal` (the default), `speed`, `asan`, `tsan` or `release`. `minimal`, `speed`, `asan` and `tsan` pass `-debug`. `release` does not. `asan` is always AddressSanitizer; `SAN=` does not change it, and it does not change `just build`.
+
 ```
-just build     debug binary with the debug allocator and ASan -> build/debug
-just release   optimised binary                                -> build/release
-just test      the package's tests against the fixture vault
-just check     type-check for linux, darwin and windows
-just install   bind this machine to a vault
-just desk      open the desk
-just preview   render the docs to build/ and open them
+just build [mode]  brain binary -> build/<mode>/brain
+just run [mode]    build that mode and run it
+just release       the release binary, exactly `just build release`
+just test          the package's tests against the fixture vault
+just check         type-check for linux, darwin and windows, with and without -debug
+just install       bind this machine to a vault
+just desk [mode]   open the desk
+just preview       render the docs to build/ and open them
 ```

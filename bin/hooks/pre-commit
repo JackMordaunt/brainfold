@@ -16,7 +16,7 @@ hookdir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 # gate runs whatever PATH git was started with.
 installed=""
 brain=""
-for c in "$installed" "$hookdir/../../build/release/brain" "$hookdir/../../build/debug/brain" \
+for c in "$installed" "$hookdir/../../build/release/brain" "$hookdir/../../build/minimal/brain" "$hookdir/../../build/debug/brain" \
          "$(command -v brain 2>/dev/null)" "$hookdir/../brain"; do
   [ -n "$c" ] && [ -x "$c" ] && { brain=$c; break; }
 done

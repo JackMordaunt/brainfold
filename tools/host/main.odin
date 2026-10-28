@@ -3,8 +3,8 @@
 // new build. It never links the child's code, so a rebuild of the child
 // is all a change takes. See `just hot` and `just desk`.
 //
-//	host build/desk.watch "brainfold" 1440x960
-//	host build/debug/desk                            a fixed child, default title and size
+//	host build/hot/minimal/desk.watch "brainfold" 1440x960
+//	host build/minimal/desk                         a fixed child, default title and size
 package main
 
 import "core:fmt"

@@ -5,8 +5,8 @@ a new build. The application lives here, not in the child, so a reload
 keeps every answer it has and the view's needs and commands cross the
 wire; a result that lands while the window is idle wakes it.
 
-	desk-host build/desk.watch [title] [WxH]
-	desk-host build/debug/desk                   a fixed child
+	desk-host build/hot/minimal/desk.watch [title] [WxH]
+	desk-host build/minimal/desk                 a fixed child
 
 BRAIN names the CLI binary, "brain" on PATH by default.
 */
